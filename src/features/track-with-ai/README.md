@@ -72,6 +72,9 @@ Each default below is set in one place.
   - On success the pill reads **Added** and is disabled, so one estimate is never added twice. A stored add also taps a
     light impact haptic (`modules/haptics`), and a failed one plays none.
   - If the write fails, a line under the card says so, and Add stays usable.
+- **Track with AI is a full-screen page that slides up from the bottom** and back down when closed (owner's
+  intake-8; `FULL_SCREEN_OPTIONS` in `src/config/navigation.ts`). iOS's full-screen presentation has no swipe to
+  dismiss, so Close is the way out.
 - **Close** is the app's `closeSheet` (`src/utils/close-sheet.ts`). It goes back when there is history,
   and otherwise replaces the route with `/`. Closing while a reply is outstanding aborts the request, so
   a reply nobody will read is not billed in full.

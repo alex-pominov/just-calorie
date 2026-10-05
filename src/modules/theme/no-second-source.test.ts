@@ -83,6 +83,17 @@ function findDesignLiterals(source: string): string[] {
   ];
 }
 
+// A spacing class whose step is not a key of the replaced scale generates no style, and NativeWind draws it as 0
+// without a word. Numeric steps only: `w-full` and `top-up` are not spacing steps.
+const SPACING_CLASS =
+  /(?<![\w.-])-?(?:p[xytblrse]?|m[xytblrse]?|gap(?:-[xy])?|space-[xy]|inset(?:-[xy])?|top|right|bottom|left|start|end|[wh]|size|(?:min|max)-[wh]|basis|translate-[xy])-(\d+(?:\.\d+)?)(?![\w./-])/g;
+
+function unknownSpacingClasses(source: string): string[] {
+  return [...source.matchAll(SPACING_CLASS)]
+    .filter((match) => !Object.hasOwn(tokens.spacing, match[1] ?? ''))
+    .map((match) => `spacing step with no token: ${match[0]}`);
+}
+
 function sourceFilesOutsideTheme(dir: string): string[] {
   return fs.readdirSync(path.join(ROOT, dir), { withFileTypes: true }).flatMap((entry) => {
     const relative = path.join(dir, entry.name);
@@ -199,5 +210,32 @@ describe('no second source for design values', () => {
       .filter((colour) => !tokenColours.has(colour));
 
     expect([...new Set(stray)]).toEqual([]);
+  });
+
+  it.each([
+    ['className="pt-13"', ['pt-13']],
+    ["cn('gap-x-11.5', active && '-mt-30')", ['gap-x-11.5', '-mt-30']],
+    ['className="active:w-15"', ['w-15']],
+  ])('flags a spacing step the scale has no key for in %s', (source, classes) => {
+    expect(unknownSpacingClasses(source)).toEqual(classes.map((name) => `spacing step with no token: ${name}`));
+  });
+
+  it('stays silent on spacing steps the scale has keys for, and on words that only look like classes', () => {
+    const source = 'className="pt-8 gap-0.5 -mt-2 inset-x-20 w-full max-w-65 active:px-3" href="/top-up" left-to-right';
+
+    expect(unknownSpacingClasses(source)).toEqual([]);
+  });
+
+  it('uses no spacing step without a token in src/ or app/', () => {
+    const files = [...sourceFilesOutsideTheme('src'), ...sourceFilesOutsideTheme('app')].filter(
+      (file) => !/\.test\.tsx?$/.test(file),
+    );
+
+    const findings = files.flatMap((file) =>
+      unknownSpacingClasses(fs.readFileSync(path.join(ROOT, file), 'utf8')).map((finding) => `${file} — ${finding}`),
+    );
+
+    expect(files).toEqual(expect.arrayContaining(['src/features/today/components/TodayScreen.tsx']));
+    expect(findings).toEqual([]);
   });
 });

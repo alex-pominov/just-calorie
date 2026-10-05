@@ -34,6 +34,9 @@ So this feature names no route.
     level with the check, in the caption style (`text-caption`, `content-muted`). Opened from today, both stay as
     Figma draws them (5:70, 5:1613, 8:3092). Manager ruling on qa f-fbf806.
   - The overage selector reads "Yesterday's overage" on today and "The previous day's overage" on a past day.
+- **Quick add is +5, +25 and +100**, then other (owner's intake-6), and the screen's spacing follows frame 1:2 as the
+  owner revised it on 2026-10-05. The other main-screen frames (5:1744, 5:1869, 5:2069, 5:2154, 9:4038) still draw
+  the earlier spacing and +25, +50, +100; where they disagree with 1:2, the screen follows 1:2.
 - **Figures** come from tracking's `dayFigures`, shown as stored, because today becomes a past day the
   calendar shows unclamped (Lead ruling U6, main-screen second to merge). Eaten is the day's net entries and
   never counts an added carry-over (Figma 5:2069 shows 0 eaten with +400 added); a day stored below zero

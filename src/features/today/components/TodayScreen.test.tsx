@@ -139,7 +139,21 @@ describe('TodayScreen', () => {
     ).toEqual({ checked: false });
   });
 
-  it.each([25, 50, 100])('stores %p kcal from its quick-add button and shows it at once', async (kcal) => {
+  it('reads + 5, + 25, + 100 and other along its quick-add row, as frame 1:2 draws it', async () => {
+    await renderScreen();
+    await waitFor(() => expect(eatenFigure()).toHaveTextContent('0'));
+
+    const row = screen.getAllByRole('button', { name: /^Add (\d+ kcal|another amount)$/ });
+
+    expect(row.map((button) => [button.props.accessibilityLabel, within(button).getByText(/./).props.children])).toEqual([
+      ['Add 5 kcal', '+ 5'],
+      ['Add 25 kcal', '+ 25'],
+      ['Add 100 kcal', '+ 100'],
+      ['Add another amount', 'other'],
+    ]);
+  });
+
+  it.each([5, 25, 100])('stores %p kcal from its quick-add button and shows it at once', async (kcal) => {
     await renderScreen();
     await waitFor(() => expect(eatenFigure()).toHaveTextContent('0'));
 
@@ -270,7 +284,7 @@ describe('TodayScreen', () => {
       expect(Haptics.selectionAsync).not.toHaveBeenCalled();
     });
 
-    it.each([25, 50, 100])('taps once with a light impact after a quick add of %p kcal is stored', async (kcal) => {
+    it.each([5, 25, 100])('taps once with a light impact after a quick add of %p kcal is stored', async (kcal) => {
       await renderScreen();
       await waitFor(() => expect(eatenFigure()).toHaveTextContent('0'));
 
@@ -400,16 +414,21 @@ describe('TodayScreen', () => {
       expect(await getDaySummary(real, daysAgo(1))).toMatchObject({ entriesTotalKcal: 1000 });
     });
 
-    it('stores a quick add on the past day shown, and leaves today alone', async () => {
+    it.each([5, 25, 100])('stores a quick add of %p kcal on the past day shown, with its tap, and leaves today alone', async (kcal) => {
       await seed('over');
       await renderScreen();
       await waitFor(() => expect(eatenFigure()).toHaveTextContent('1600'));
       await swipeRight();
       await waitFor(() => expect(eatenFigure()).toHaveTextContent('1000'));
+      await settle();
+      jest.mocked(Haptics.impactAsync).mockClear();
 
-      await fireEvent.press(screen.getByRole('button', { name: 'Add 25 kcal' }));
+      await fireEvent.press(screen.getByRole('button', { name: `Add ${kcal} kcal` }));
 
-      await waitFor(() => expect(eatenFigure()).toHaveTextContent('1025'));
+      await waitFor(() => expect(eatenFigure()).toHaveTextContent(String(1000 + kcal)));
+      await settle();
+      expect(jest.mocked(Haptics.impactAsync).mock.calls).toEqual([[Haptics.ImpactFeedbackStyle.Light]]);
+      expect(await getDaySummary(database, daysAgo(1))).toMatchObject({ entriesTotalKcal: 1000 + kcal });
       expect(await getDaySummary(database, todayKey())).toMatchObject({ entriesTotalKcal: 1600 });
     });
 

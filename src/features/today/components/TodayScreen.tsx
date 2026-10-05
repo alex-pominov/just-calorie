@@ -23,7 +23,8 @@ interface TodayScreenProps {
 // A horizontal drag only: a vertical one, or a tap on a button, never changes the day.
 const SWIPE_START_PX = 15;
 
-// Spacing follows Figma 5:1744. The bowl's SVG rises 8px above its 152px frame, so 48 + 8 makes the 56px gap.
+// Spacing follows Figma 1:2, as the owner revised it. The bowl's SVG rises 8px above its 152px frame, so 32 + 8 makes
+// the 40px gap above it.
 export const TodayScreen = ({ onOpenCalendar, onTrackWithAi, onOpenTopUp, onEditCap }: TodayScreenProps) => {
   const { dayKey, monthName, weekDays, view, addKcal, toggleCarryOver, selectDay, showPreviousDay, showNextDay } =
     useToday();
@@ -42,12 +43,12 @@ export const TodayScreen = ({ onOpenCalendar, onTrackWithAi, onOpenTopUp, onEdit
 
   return (
     <View className="flex-1 bg-ink-900" style={{ paddingTop: insets.top }}>
-      <View className="items-center gap-4 px-4">
+      <View className="items-center gap-6 px-4 pt-2">
         <Logo accessibilityLabel="Just Calorie" />
         <WeekStrip days={weekDays} monthName={monthName} onSelectDay={selectDay} onOpenCalendar={onOpenCalendar} />
       </View>
       <GestureDetector gesture={swipe}>
-        <View className="flex-1 pt-6">
+        <View className="flex-1 pt-8">
           {view === null ? null : (
             <View className="items-center px-4">
               <EatenSummary
@@ -57,15 +58,15 @@ export const TodayScreen = ({ onOpenCalendar, onTrackWithAi, onOpenTopUp, onEdit
                 onToggleCarryOver={toggleCarryOver}
                 onEditCap={() => onEditCap(view.dayKey)}
               />
-              <View className="mt-12">
+              <View className="mt-8">
                 <Bowl key={view.dayKey} state={view.bowl} accessibilityLabel={view.bowlLabel} />
               </View>
-              <View className="mt-14 self-stretch">
+              <View className="mt-10 self-stretch">
                 <QuickAddButtons onAdd={addKcal} onOther={() => onOpenTopUp(view.dayKey)} />
               </View>
             </View>
           )}
-          <View className="mt-11">
+          <View className="mt-8">
             <TrackWithAiButton onPress={() => onTrackWithAi(dayKey)} />
           </View>
         </View>

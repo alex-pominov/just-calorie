@@ -36,5 +36,8 @@ icon (main-screen workstream) navigates there. Nothing imports the feature other
   adding or upgrading it needs a new development build.
 - **Close goes back when there is history** and replaces the route with `/` otherwise, so a deep link
   straight to `/calendar` still closes to the main screen.
+- **The calendar is a full-screen page that slides up from the bottom** and back down when closed (owner's intake-8;
+  `FULL_SCREEN_OPTIONS` in `src/config/navigation.ts`). iOS's full-screen presentation has no swipe to dismiss, so
+  Close is the way out.
 - **Calendar arithmetic runs in UTC**, where a daylight-saving change cannot skip or repeat a day.
   Day keys are the device's local dates, so this only decides how they are laid out.
