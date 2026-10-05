@@ -1,3 +1,4 @@
+import type * as ChatGPTAuthMock from '@tests/chatgpt-auth.mock';
 import {
   ActivityIndicator,
   findNodeHandle,
@@ -19,6 +20,9 @@ import { TrackWithAiScreen } from './TrackWithAiScreen';
 
 // QA reproduction (track-with-ai, round 1a): a second tap that lands before the re-render which
 // disables its button. Both taps run inside ONE act, so React commits nothing between them.
+// The chat shows only when signed in (Figma 24:4327); these tests drive the chat.
+jest.mock('@/modules/chatgpt-auth', () => jest.requireActual<typeof ChatGPTAuthMock>('@tests/chatgpt-auth.mock').chatGPTAuthMock);
+
 jest.mock('@/modules/calorie-estimate', () => ({
   ...jest.requireActual('@/modules/calorie-estimate'),
   estimateCalories: jest.fn(),

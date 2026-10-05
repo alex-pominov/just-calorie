@@ -11,7 +11,8 @@ was opened for. `app/track.tsx` renders `TrackWithAiScreen` for the day its `day
   more than a year back, Add writes to today.
 - **It consumes** `estimateCalories` and `EstimateError` from `@/modules/calorie-estimate`, the one
   place the vendor call lives. From `@/features/tracking` it uses `useAddEntry`, `useTodayKey`, `dateName` and `MAX_KCAL`.
-  From `@/modules/chatgpt-auth` it uses the session status, sign-in, sign-out and the usage-settings link.
+  From `@/modules/chatgpt-auth` it uses the session status, whether an account is saved, sign-in, sign-out and the
+  usage-settings link.
 
 ## Behaviour
 
@@ -34,7 +35,7 @@ Each default below is set in one place.
 
   | Failure | Line |
   | --- | --- |
-  | nobody signed in (and, in development, no key) | Continue with ChatGPT to get calorie estimates. |
+  | nobody signed in | Sign in with ChatGPT to get calorie estimates. |
   | no network or a timeout | I couldn't reach the estimate service. Check your connection and try again. |
   | API error | The estimate service returned an error. Please try again in a moment. |
   | ChatGPT usage limit | You've reached your ChatGPT usage limit. You can review it in ChatGPT settings. |
@@ -42,19 +43,34 @@ Each default below is set in one place.
   | unreadable response | I couldn't read that estimate. Please try again. |
 
   A failure that is not an `EstimateError` gets a generic line.
-- **Sign in with ChatGPT** (`ChatGPTAccountRow`, above the input row; copy in `chatgpt-account-copy.service.ts`):
-  - Signed out, a white **Continue with ChatGPT** pill, the label OpenAI's UI guidelines ask for. It opens
-    OpenAI's sign-in and reads **Signing in…**, disabled, until it ends. A cancelled sign-in says nothing; any other
-    ending leaves one line under the pill naming why.
-  - Signed in, **Using ChatGPT plan**, then **Manage usage** (ChatGPT's usage settings) and **Sign out**. A sign-out
-    OpenAI did not confirm says so, and points at ChatGPT settings to disconnect the app.
-  - Nothing shows until the Keychain has been read, so the pill never flashes for a signed-in user.
-  - Every estimate runs on the signed-in user's ChatGPT plan. In a development build a signed-out chat can still
-    estimate on the development key (`modules/calorie-estimate`); a production build cannot.
+- **Sign in with ChatGPT** decides which of two states the screen shows, under the same header (copy in
+  `chatgpt-account-copy.service.ts`; the Lead's decisions D1-D6 for what the frames do not draw, task 9, approved as
+  request [3]):
+  - **Signed out (Figma `24:4273`)**: only a centred line, **To activate AI features**, over a white
+    **Sign In with ChatGPT** pill (`ChatGPTSignInPrompt`). There is no chat and no input row. The pill opens OpenAI's
+    sign-in for the account used last on this phone, with the client it registered, and reads **Signing in…**,
+    disabled, until it ends (D1).
+  - On a phone where an account has signed in before, a text link under the pill, **Use a different ChatGPT
+    account**, registers another account with its own client (D2; OpenAI's sign-in docs, §1: "let them choose a saved
+    ChatGPT account or add another account"). A fresh install shows exactly the frame, with no link.
+  - A cancelled sign-in says nothing. Any other ending leaves one line under the pill naming why (D3).
+  - **Signed in (Figma `24:4327`)**: the chat and its input row, with **Sign Out from GPT** under the row
+    (`SignedInChat`, `ChatGPTSignOutLink`). While the chat is empty, **What have I eaten today?** sits centred above
+    the row (D6); it goes with the first message. Sign Out from GPT stays under the row, and reads **Signing out…**,
+    disabled, until the sign-out ends (D5). A sign-out that failed, or that OpenAI did not confirm, leaves one line
+    under the link (D3); the unconfirmed one points at ChatGPT settings to disconnect the app.
+  - **Leaving signed-in discards the chat** (qa f-d56e21): the moment the session starts signing out, or ends on its
+    own, the messages, the typed draft and an attached photo go, and a reply still in flight is aborted, since it was
+    fetched with that session's token. The next sign-in, another account included, starts at the empty chat.
+  - **ChatGPT settings** in the usage-limit and plan-unavailable lines is a link to ChatGPT's usage settings (D4). If
+    those settings cannot open, a line under Sign Out from GPT says so. There is no separate Manage usage control.
+  - Neither state shows until the Keychain has been read, so the sign-in prompt never flashes for a signed-in user.
+  - Every estimate runs on the signed-in user's ChatGPT plan; there is no other credential.
 - **Add:**
   - It records exactly N kcal as an `add` entry on the day `/track` was opened for. Its label and its failure
     line name that day: "today", or a past day's date ("Friday 2 October").
-  - On success the pill reads **Added** and is disabled, so one estimate is never added twice.
+  - On success the pill reads **Added** and is disabled, so one estimate is never added twice. A stored add also taps a
+    light impact haptic (`modules/haptics`), and a failed one plays none.
   - If the write fails, a line under the card says so, and Add stays usable.
 - **Close** is the app's `closeSheet` (`src/utils/close-sheet.ts`). It goes back when there is history,
   and otherwise replaces the route with `/`. Closing while a reply is outstanding aborts the request, so
@@ -103,8 +119,8 @@ Frame `9:3192` does not draw these, so they are built from existing tokens:
 - the attached-photo preview, with its remove button;
 - the picker note;
 - the over-limit line;
-- the ChatGPT account row: the Continue with ChatGPT pill, its signing-in and signing-out states (disabled, "Signing
-  in…" / "Signing out…") and note, and the signed-in line.
+- the ChatGPT states' extras, which frames `24:4273` and `24:4327` do not draw: Signing in… and Signing out…, the
+  Use a different ChatGPT account link, the outcome line, and the ChatGPT settings link inside an error line.
 
 ## Deviations from the frame, on purpose
 

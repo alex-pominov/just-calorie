@@ -27,7 +27,17 @@ export interface TokenSet {
   readonly scopes: readonly string[] | null;
 }
 
-export type RefreshResult = { readonly ok: true; readonly tokens: TokenSet } | { readonly ok: false; readonly reason: 'ended' };
+/** `invalid-client`: OpenAI no longer accepts the client itself (errors and recovery, "Invalid client"). */
+export type ExchangeResult =
+  | { readonly ok: true; readonly tokens: TokenSet }
+  | { readonly ok: false; readonly reason: 'refused' | 'invalid-client' };
+
+export type RefreshResult =
+  | { readonly ok: true; readonly tokens: TokenSet }
+  | { readonly ok: false; readonly reason: 'ended' | 'invalid-client' };
+
+// The one part of an error body ever read: an OAuth error code, kept only when it is plainly one.
+const OAUTH_ERROR_CODE = /^[a-z_]{1,64}$/;
 
 const formBody = (fields: Record<string, string>) =>
   Object.entries(fields)
@@ -43,8 +53,10 @@ const optionalString = (value: unknown) => (typeof value === 'string' && value.t
 interface TokenEndpointReply {
   readonly ok: boolean;
   readonly status: number;
-  /** The parsed JSON body of a 2xx; an error body is never read. */
+  /** The parsed JSON body of a 2xx. */
   readonly body: unknown;
+  /** A refusal's OAuth `error` code, or null. Nothing else of an error body is kept. */
+  readonly errorCode: string | null;
 }
 
 // A failure carries no body: OAuth error bodies can quote what they were sent, and a token must never reach a message.
@@ -68,17 +80,25 @@ async function post(
         throw new ChatGPTAuthError('network', { cause: error });
       });
 
-    if (!response.ok || !request.readBody) return { ok: response.ok, status: response.status, body: undefined };
+    if (!request.readBody) return { ok: response.ok, status: response.status, body: undefined, errorCode: null };
 
     // Not every fetch stops reading a body when its signal aborts, so the read races the abort itself.
     const aborted = new Promise<never>((_resolve, reject) => {
       controller.signal.addEventListener('abort', () => reject(new Error('The token request timed out')));
     });
-    const body = await Promise.race([response.json(), aborted]).catch((error: unknown) => {
+    const json = Promise.race([response.json(), aborted]);
+
+    if (!response.ok) {
+      const code = prop(await json.catch(() => null), 'error');
+
+      return { ok: false, status: response.status, body: undefined, errorCode: typeof code === 'string' && OAUTH_ERROR_CODE.test(code) ? code : null };
+    }
+
+    const body = await json.catch((error: unknown) => {
       throw new ChatGPTAuthError(controller.signal.aborted ? 'network' : 'failed', { cause: error });
     });
 
-    return { ok: true, status: response.status, body };
+    return { ok: true, status: response.status, body, errorCode: null };
   } finally {
     clearTimeout(timer);
   }
@@ -107,7 +127,7 @@ function readTokenSet(body: unknown): TokenSet {
 export async function exchangeCode(
   dependencies: TokenEndpointDependencies,
   request: { readonly clientId: string; readonly code: string; readonly codeVerifier: string; readonly redirectUri: string },
-): Promise<TokenSet> {
+): Promise<ExchangeResult> {
   const reply = await post(dependencies, {
     url: OPENAI_AUTH_ENDPOINTS.token,
     fields: {
@@ -121,13 +141,13 @@ export async function exchangeCode(
     readBody: true,
   });
 
-  if (!reply.ok) throw new ChatGPTAuthError('failed');
+  if (!reply.ok) return { ok: false, reason: reply.errorCode === 'invalid_client' ? 'invalid-client' : 'refused' };
 
-  return readTokenSet(reply.body);
+  return { ok: true, tokens: readTokenSet(reply.body) };
 }
 
 // 408 and 429 are the server asking for later, and 5xx is the server failing; any other 4xx means the refresh
-// token will never work again (invalid_grant, a reused or expired token, an invalid client).
+// token will never work again (invalid_grant, a reused or expired token), and invalid_client that the client is gone.
 const isTransient = (status: number) => status === 408 || status === 429 || status >= 500;
 
 /** Swaps the refresh token for a new pair. Omitting `scope` keeps the grant as it was. */
@@ -144,14 +164,17 @@ export async function refreshTokens(
   if (reply.ok) return { ok: true, tokens: readTokenSet(reply.body) };
   if (isTransient(reply.status)) throw new ChatGPTAuthError('network');
 
-  return { ok: false, reason: 'ended' };
+  return { ok: false, reason: reply.errorCode === 'invalid_client' ? 'invalid-client' : 'ended' };
 }
 
-/** Ends the renewable session. True only when OpenAI confirmed it; an empty 200 is success. */
+/** `unreachable` (no answer, or a 5xx) may be retried; `refused` (a 4xx) is final. */
+export type RevokeResult = 'revoked' | 'refused' | 'unreachable';
+
+/** Ends the renewable session. An empty 200 is success, even for a token already invalid. */
 export async function revokeRefreshToken(
   dependencies: TokenEndpointDependencies,
   request: { readonly clientId: string; readonly refreshToken: string },
-): Promise<boolean> {
+): Promise<RevokeResult> {
   try {
     const reply = await post(dependencies, {
       url: OPENAI_AUTH_ENDPOINTS.revocation,
@@ -159,9 +182,11 @@ export async function revokeRefreshToken(
       readBody: false,
     });
 
-    return reply.ok;
+    if (reply.ok) return 'revoked';
+
+    return reply.status >= 500 ? 'unreachable' : 'refused';
   } catch (error) {
-    if (error instanceof ChatGPTAuthError) return false;
+    if (error instanceof ChatGPTAuthError) return 'unreachable';
     throw error;
   }
 }

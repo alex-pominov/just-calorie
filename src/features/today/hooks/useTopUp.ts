@@ -2,6 +2,7 @@ import { useState } from 'react';
 
 import type { EntryKind } from '@/features/tracking';
 import { MAX_KCAL, useAddEntry, useDaySummary } from '@/features/tracking';
+import { playLightImpactHaptic } from '@/modules/haptics';
 
 import type { KcalDraft } from './useKcalDraft';
 import { useKcalDraft } from './useKcalDraft';
@@ -21,7 +22,11 @@ export function useTopUp(dayKey: string, onDone: () => void): TopUp {
   const draft = useKcalDraft({
     initialText: '',
     maxKcal: kind === 'remove' ? removableKcal : MAX_KCAL,
-    store: (kcal) => addEntry({ dayKey, kind, kcal }),
+    store: async (kcal) => {
+      await addEntry({ dayKey, kind, kcal });
+      // A stored add taps; a removal does not.
+      if (kind === 'add') playLightImpactHaptic();
+    },
     onDone,
   });
 

@@ -11,6 +11,7 @@ interface ChatMessageListProps {
   dayName: string;
   headerHeight: number;
   onAdd: (message: AiMessageModel) => void;
+  onOpenUsageSettings: () => void;
 }
 
 /**
@@ -18,7 +19,7 @@ interface ChatMessageListProps {
  * viewport shrinks (the keyboard opening). The offset comes from the two native measurements: FlatList's own
  * scrollToEnd reads cell metrics that are stale when the content changes, and stops short.
  */
-export const ChatMessageList = ({ messages, dayName, headerHeight, onAdd }: ChatMessageListProps) => {
+export const ChatMessageList = ({ messages, dayName, headerHeight, onAdd, onOpenUsageSettings }: ChatMessageListProps) => {
   const list = useRef<FlatList<ChatMessage>>(null);
   const viewportHeight = useRef(0);
   const contentHeight = useRef(0);
@@ -36,7 +37,7 @@ export const ChatMessageList = ({ messages, dayName, headerHeight, onAdd }: Chat
         item.role === 'user' ? (
           <UserMessageBubble message={item} />
         ) : (
-          <AiMessage message={item} dayName={dayName} onAdd={onAdd} />
+          <AiMessage message={item} dayName={dayName} onAdd={onAdd} onOpenUsageSettings={onOpenUsageSettings} />
         )
       }
       className="flex-1"

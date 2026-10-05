@@ -20,18 +20,6 @@ export type CalorieEstimate = {
 
 export type EstimateErrorKind = 'missing-auth' | 'network' | 'api' | 'usage-limit' | 'plan-unavailable' | 'invalid-response';
 
-/** Where the estimate request goes. `devApiKey` is null in every production build and when no key is set. */
-export type EstimateConfig = {
-  readonly devApiKey: string | null;
-  readonly baseUrl: string;
-};
-
-/** Whose account pays for an estimate: the signed-in user's ChatGPT plan, or a development build's API key. */
-export interface EstimateCredential {
-  readonly kind: 'chatgpt-plan' | 'api-key';
-  readonly token: string;
-}
-
 /** Per-call options. An aborted `signal` stops the request; the call then rejects with the abort, not an EstimateError. */
 export interface EstimateOptions {
   signal?: AbortSignal | undefined;

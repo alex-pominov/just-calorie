@@ -25,6 +25,10 @@ So this feature names no route.
   - Until a newly shown day is read, the last day read stays on screen, so a swipe never blanks the screen. Every
     action writes to the day on screen.
   - The bowl is keyed by its day, so each switch re-drops that day's balls.
+  - **Haptics** (owner's intake-5; Manager defaults, 2026-10-05): a swipe that changes the day ticks a selection haptic
+    once, and none at either end of the range. Quick add and the top-up's Add tap a light impact once the entry is
+    stored, and never for a write that failed. A week-strip tap, Remove and a cap edit play none. iOS's System Haptics
+    setting governs (`modules/haptics`).
   - Editing a cap from a past day sets that day's cap alone. From today it also sets the daily cap, as before.
   - Opened from a past day, the cap pop-up shows the day's date under its title and the Add/Remove pop-up shows it
     level with the check, in the caption style (`text-caption`, `content-muted`). Opened from today, both stay as

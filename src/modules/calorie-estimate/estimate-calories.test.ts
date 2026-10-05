@@ -1,14 +1,8 @@
-import type { EstimateCredential } from './calorie-estimate.types';
 import { createEstimateCalories } from './estimate-calories';
 import { createCredentialSource } from './estimate-credential';
 import { EstimateError } from './estimate-error';
-import { ESTIMATE_MODEL } from './openai-request';
 
-const FAKE_KEY = 'sk-test-FAKE-KEY-0123456789-must-never-leak';
 const USER_TOKEN = 'chatgpt-user-token-FAKE-0123456789-must-never-leak';
-const KEY: EstimateCredential = { kind: 'api-key', token: FAKE_KEY };
-const PLAN: EstimateCredential = { kind: 'chatgpt-plan', token: USER_TOKEN };
-const BASE_URL = 'https://api.openai.com/v1';
 const PHOTO = { base64: 'AAECAwQF', mimeType: 'image/jpeg' };
 const ESTIMATE = { reply: 'An apple, about 95 kcal.', kcal: 95 };
 
@@ -47,14 +41,13 @@ function routedFetch(responses: { stream?: () => ReturnType<typeof respond>; cat
   );
 }
 
-function setup(options: { credential?: EstimateCredential | null; fetch?: jest.Mock; timeoutMs?: number; baseUrl?: string } = {}) {
-  const credential = { current: options.credential === undefined ? KEY : options.credential };
+function setup(options: { credential?: string | null; fetch?: jest.Mock; timeoutMs?: number } = {}) {
+  const credential = { current: options.credential === undefined ? USER_TOKEN : options.credential };
   const fetch = options.fetch ?? routedFetch();
   const onCredentialRejected = jest.fn();
   const estimate = createEstimateCalories({
     getCredential: () => Promise.resolve(credential.current),
     onCredentialRejected,
-    getBaseUrl: () => options.baseUrl ?? BASE_URL,
     fetch,
     ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
   });
@@ -101,14 +94,13 @@ describe('estimateCalories', () => {
 
     await expect(estimate({ text: '  one apple  ' })).resolves.toEqual(ESTIMATE);
 
-    expect(fetch).toHaveBeenCalledTimes(1);
-    expect(fetch.mock.calls[0]?.[0]).toBe('https://api.openai.com/v1/responses');
-    expect(fetch.mock.calls[0]?.[1]).toMatchObject({
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual(['https://api.openai.com/v1/models', 'https://api.openai.com/v1/responses']);
+    expect(callsTo(fetch, '/responses')[0]?.[1]).toMatchObject({
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', Authorization: `Bearer ${FAKE_KEY}` },
+      headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', Authorization: `Bearer ${USER_TOKEN}` },
     });
     expect(sentBody(fetch)).toMatchObject({
-      model: ESTIMATE_MODEL,
+      model: 'gpt-6.1-sol',
       store: false,
       stream: true,
       text: { format: { type: 'json_schema', strict: true, schema: { required: ['reply', 'kcal'] } } },
@@ -144,14 +136,6 @@ describe('estimateCalories', () => {
     ]);
   });
 
-  it('takes the base URL from the config', async () => {
-    const { estimate, fetch } = setup({ baseUrl: 'http://127.0.0.1:9' });
-
-    await estimate({ text: 'apple' });
-
-    expect(fetch.mock.calls[0]?.[0]).toBe('http://127.0.0.1:9/responses');
-  });
-
   it("refuses with 'missing-auth' and never calls fetch when there is no credential", async () => {
     const { estimate, fetch } = setup({ credential: null });
 
@@ -159,12 +143,11 @@ describe('estimateCalories', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it('cannot call OpenAI at all from a production install nobody has signed in to', async () => {
+  it('cannot call OpenAI at all when nobody is signed in, whatever the build', async () => {
     const fetch = routedFetch();
     const estimate = createEstimateCalories({
-      getCredential: createCredentialSource({ getChatGPTAccessToken: () => Promise.resolve(null), getDevApiKey: () => null }),
+      getCredential: createCredentialSource({ getChatGPTAccessToken: () => Promise.resolve(null) }),
       onCredentialRejected: jest.fn(),
-      getBaseUrl: () => BASE_URL,
       fetch,
     });
 
@@ -181,7 +164,7 @@ describe('estimateCalories', () => {
 
   describe("on the signed-in user's ChatGPT plan", () => {
     it("asks the account's model catalog with the user's token, then estimates on the model it lists", async () => {
-      const { estimate, fetch } = setup({ credential: PLAN });
+      const { estimate, fetch } = setup();
 
       await expect(estimate({ text: 'apple' })).resolves.toEqual(ESTIMATE);
 
@@ -191,7 +174,7 @@ describe('estimateCalories', () => {
     });
 
     it('sends none of the fields the plan route refuses', async () => {
-      const { estimate, fetch } = setup({ credential: PLAN });
+      const { estimate, fetch } = setup();
 
       await estimate({ text: 'apple' });
 
@@ -200,18 +183,18 @@ describe('estimateCalories', () => {
     });
 
     it('asks the catalog once per token, and again when the token is replaced', async () => {
-      const { estimate, fetch, credential } = setup({ credential: PLAN });
+      const { estimate, fetch, credential } = setup();
 
       await estimate({ text: 'apple' });
       await estimate({ text: 'pear' });
-      credential.current = { kind: 'chatgpt-plan', token: 'refreshed-token' };
+      credential.current = 'refreshed-token';
       await estimate({ text: 'fig' });
 
       expect(callsTo(fetch, '/models')).toHaveLength(2);
     });
 
     it("reads HTTP 429 as the plan's 'usage-limit'", async () => {
-      const { estimate } = setup({ credential: PLAN, fetch: routedFetch({ stream: () => respond(429) }) });
+      const { estimate } = setup({ fetch: routedFetch({ stream: () => respond(429) }) });
 
       await expect(estimate({ text: 'apple' })).rejects.toMatchObject({ kind: 'usage-limit', status: 429 });
     });
@@ -219,19 +202,19 @@ describe('estimateCalories', () => {
     it("hands back a token OpenAI refuses, and retries once on the refreshed one", async () => {
       let calls = 0;
       const fetch = routedFetch({ stream: () => (calls++ === 0 ? respond(401) : respond(200, { text: completedStream(ESTIMATE) })) });
-      const { estimate, credential, onCredentialRejected } = setup({ credential: PLAN, fetch });
+      const { estimate, credential, onCredentialRejected } = setup({ fetch });
       onCredentialRejected.mockImplementation(() => {
-        credential.current = { kind: 'chatgpt-plan', token: 'refreshed-token' };
+        credential.current = 'refreshed-token';
       });
 
       await expect(estimate({ text: 'apple' })).resolves.toEqual(ESTIMATE);
 
-      expect(onCredentialRejected).toHaveBeenCalledWith(PLAN);
+      expect(onCredentialRejected).toHaveBeenCalledWith(USER_TOKEN);
       expect(callsTo(fetch, '/responses')[1]?.[1]).toMatchObject({ headers: { Authorization: 'Bearer refreshed-token' } });
     });
 
     it("reads 'missing-auth' when the refused session cannot be refreshed", async () => {
-      const { estimate, credential, onCredentialRejected } = setup({ credential: PLAN, fetch: routedFetch({ stream: () => respond(401) }) });
+      const { estimate, credential, onCredentialRejected } = setup({ fetch: routedFetch({ stream: () => respond(401) }) });
       onCredentialRejected.mockImplementation(() => {
         credential.current = null;
       });
@@ -240,7 +223,7 @@ describe('estimateCalories', () => {
     });
 
     it("gives up with 'api' 401 when the refreshed token is refused too", async () => {
-      const { estimate, fetch, onCredentialRejected } = setup({ credential: PLAN, fetch: routedFetch({ stream: () => respond(401) }) });
+      const { estimate, fetch, onCredentialRejected } = setup({ fetch: routedFetch({ stream: () => respond(401) }) });
 
       await expect(estimate({ text: 'apple' })).rejects.toMatchObject({ kind: 'api', status: 401 });
 
@@ -249,26 +232,18 @@ describe('estimateCalories', () => {
     });
 
     it("reads HTTP 403 as 'plan-unavailable', not as a failure worth retrying", async () => {
-      const { estimate, onCredentialRejected } = setup({ credential: PLAN, fetch: routedFetch({ stream: () => respond(403) }) });
+      const { estimate, onCredentialRejected } = setup({ fetch: routedFetch({ stream: () => respond(403) }) });
 
       await expect(estimate({ text: 'apple' })).rejects.toMatchObject({ kind: 'plan-unavailable', status: 403 });
       expect(onCredentialRejected).not.toHaveBeenCalled();
     });
 
     it("reads a refused catalog request as 'api' with its status", async () => {
-      const { estimate, fetch } = setup({ credential: PLAN, fetch: routedFetch({ catalog: () => respond(401) }) });
+      const { estimate, fetch } = setup({ fetch: routedFetch({ catalog: () => respond(401) }) });
 
       await expect(estimate({ text: 'apple' })).rejects.toMatchObject({ kind: 'api', status: 401 });
       expect(callsTo(fetch, '/responses')).toHaveLength(0);
     });
-  });
-
-  it('caps the output on the development key route only', async () => {
-    const { estimate, fetch } = setup();
-
-    await estimate({ text: 'apple' });
-
-    expect(sentBody(fetch).max_output_tokens).toBeGreaterThan(0);
   });
 
   it("maps a rejected fetch to 'network'", async () => {
@@ -281,9 +256,10 @@ describe('estimateCalories', () => {
   });
 
   it("maps a stream that drops mid-body to 'network'", async () => {
-    const fetch = jest.fn(() =>
-      Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}), text: () => Promise.reject(new TypeError('Network request failed')) }),
-    );
+    const fetch = routedFetch({
+      stream: () =>
+        Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}), text: () => Promise.reject(new TypeError('Network request failed')) }),
+    });
     const { estimate } = setup({ fetch });
 
     await expect(estimate({ text: 'apple' })).rejects.toMatchObject({ kind: 'network' });
@@ -346,7 +322,6 @@ describe('estimateCalories', () => {
         return Promise.reject(new EstimateError('network'));
       },
       onCredentialRejected: jest.fn(),
-      getBaseUrl: () => BASE_URL,
       fetch: routedFetch(),
     });
 
@@ -368,13 +343,13 @@ describe('estimateCalories', () => {
     expect(error).not.toBeInstanceOf(EstimateError);
   });
 
-  it.each([401, 429, 500])("maps HTTP %i on the development key route to 'api' with the status, retrying nothing", async (status) => {
-    const { estimate, fetch, onCredentialRejected } = setup({ fetch: routedFetch({ stream: () => respond(status) }) });
+  it("maps HTTP 500 to 'api' with the status, retrying nothing", async () => {
+    const { estimate, fetch, onCredentialRejected } = setup({ fetch: routedFetch({ stream: () => respond(500) }) });
 
-    await expect(estimate({ text: 'apple' })).rejects.toMatchObject({ kind: 'api', status });
+    await expect(estimate({ text: 'apple' })).rejects.toMatchObject({ kind: 'api', status: 500 });
 
     expect(onCredentialRejected).not.toHaveBeenCalled();
-    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(callsTo(fetch, '/responses')).toHaveLength(1);
   });
 
   it("maps a reply that breaks the schema to 'invalid-response'", async () => {
@@ -384,23 +359,22 @@ describe('estimateCalories', () => {
   });
 
   describe('never lets a credential out', () => {
-    // OpenAI's real 401 body quotes the key it was sent; the estimator must not read it into an error.
-    const echoing = { json: { error: { message: `Incorrect API key provided: ${FAKE_KEY} ${USER_TOKEN}` } }, text: `${FAKE_KEY} ${USER_TOKEN}` };
+    // OpenAI's real 401 body quotes the token it was sent; the estimator must not read it into an error.
+    const echoing = { json: { error: { message: `Incorrect API key provided: ${USER_TOKEN}` } }, text: USER_TOKEN };
 
     it.each([
-      ['a 401 whose body echoes the key', KEY, routedFetch({ stream: () => respond(401, echoing) })],
-      ['a 500', KEY, routedFetch({ stream: () => respond(500, echoing) })],
-      ['a rejected fetch', KEY, jest.fn(() => Promise.reject(new TypeError('Network request failed')))],
-      ['a malformed stream', KEY, routedFetch({ stream: () => respond(200, { text: `data: ${USER_TOKEN}\n\n` }) })],
-      ['a refused catalog request', PLAN, routedFetch({ catalog: () => respond(401, echoing) })],
-      ['a usage limit', PLAN, routedFetch({ stream: () => respond(429, echoing) })],
-    ])('in the error from %s', async (_case, credential, fetch) => {
-      const { estimate } = setup({ credential, fetch });
+      ['a 401 whose body echoes the token', routedFetch({ stream: () => respond(401, echoing) })],
+      ['a 500', routedFetch({ stream: () => respond(500, echoing) })],
+      ['a rejected fetch', jest.fn(() => Promise.reject(new TypeError('Network request failed')))],
+      ['a malformed stream', routedFetch({ stream: () => respond(200, { text: `data: ${USER_TOKEN}\n\n` }) })],
+      ['a refused catalog request', routedFetch({ catalog: () => respond(401, echoing) })],
+      ['a usage limit', routedFetch({ stream: () => respond(429, echoing) })],
+    ])('in the error from %s', async (_case, fetch) => {
+      const { estimate } = setup({ fetch });
 
       const error = await caught(estimate({ text: 'apple' }));
 
       expect(error).toBeInstanceOf(EstimateError);
-      expect(everyTextOf(error)).not.toContain(FAKE_KEY);
       expect(everyTextOf(error)).not.toContain(USER_TOKEN);
       expect(everyTextOf(error)).not.toContain('Bearer');
     });

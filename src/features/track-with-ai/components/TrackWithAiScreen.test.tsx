@@ -1,3 +1,4 @@
+import type * as ChatGPTAuthMock from '@tests/chatgpt-auth.mock';
 import {
   ActivityIndicator,
   findNodeHandle,
@@ -13,15 +14,25 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 import { act, fireEvent, renderRouter, screen, waitFor } from 'expo-router/testing-library';
+import * as Haptics from 'expo-haptics';
 
 import type { CalorieEstimate } from '@/modules/calorie-estimate';
 import { EstimateError, estimateCalories } from '@/modules/calorie-estimate';
 
 import { TrackWithAiScreen } from './TrackWithAiScreen';
 
+// The chat shows only when signed in (Figma 24:4327); these tests drive the chat.
+jest.mock('@/modules/chatgpt-auth', () => jest.requireActual<typeof ChatGPTAuthMock>('@tests/chatgpt-auth.mock').chatGPTAuthMock);
+
 jest.mock('@/modules/calorie-estimate', () => ({
   ...jest.requireActual('@/modules/calorie-estimate'),
   estimateCalories: jest.fn(),
+}));
+
+jest.mock('expo-haptics', () => ({
+  selectionAsync: jest.fn(() => Promise.resolve()),
+  impactAsync: jest.fn(() => Promise.resolve()),
+  ImpactFeedbackStyle: { Light: 'light', Medium: 'medium', Heavy: 'heavy', Rigid: 'rigid', Soft: 'soft' },
 }));
 
 const mockAddEntry = jest.fn();
@@ -144,7 +155,7 @@ describe('TrackWithAiScreen', () => {
   });
 
   it.each([
-    ['missing-auth', 'Continue with ChatGPT to get calorie estimates.'],
+    ['missing-auth', 'Sign in with ChatGPT to get calorie estimates.'],
     ['network', "I couldn't reach the estimate service. Check your connection and try again."],
     ['api', 'The estimate service returned an error. Please try again in a moment.'],
     ['usage-limit', "You've reached your ChatGPT usage limit. You can review it in ChatGPT settings."],
@@ -201,6 +212,22 @@ describe('TrackWithAiScreen', () => {
 
     expect(mockAddEntry).toHaveBeenLastCalledWith({ dayKey: '2026-10-02', kind: 'add', kcal: 150 });
     expect(await screen.findByRole('button', { name: 'Added 150 kcal to Friday 2 October' })).toBeDisabled();
+  });
+
+  it('taps once with a light impact when the estimate is stored, and not for an add that failed', async () => {
+    mockAddEntry.mockRejectedValueOnce(new Error('disk full'));
+    await openTrack();
+    await sendText('two eggs');
+
+    await fireEvent.press(await screen.findByRole('button', { name: 'Add 150 kcal to today' }));
+    expect(await screen.findByText("Couldn't add it to today. Please try again.")).toBeOnTheScreen();
+    const afterFailure = jest.mocked(Haptics.impactAsync).mock.calls.length;
+    await fireEvent.press(screen.getByRole('button', { name: 'Add 150 kcal to today' }));
+    expect(await screen.findByText('Added')).toBeOnTheScreen();
+
+    await waitFor(() => expect(Haptics.impactAsync).toHaveBeenCalledTimes(1));
+    expect(afterFailure).toBe(0);
+    expect(Haptics.impactAsync).toHaveBeenCalledWith(Haptics.ImpactFeedbackStyle.Light);
   });
 
   it('shows a failed add and leaves Add usable', async () => {

@@ -7,6 +7,7 @@ import {
   signInWithChatGPT,
   signOutOfChatGPT,
   useChatGPTSessionStatus,
+  useHasSavedChatGPTAccount,
 } from '@/modules/chatgpt-auth';
 
 import {
@@ -18,9 +19,13 @@ import {
 
 export interface ChatGPTAccount {
   readonly status: ChatGPTSessionStatus;
+  /** An account has signed in on this phone before: the pill reuses it, and another account can be added. */
+  readonly hasSavedAccount: boolean;
   /** The last sign-in, sign-out or settings outcome worth a line, or null. */
   readonly note: string | null;
   readonly signIn: () => Promise<void>;
+  /** Signs in a ChatGPT account other than the saved one, registering its own client. */
+  readonly signInWithAnotherAccount: () => Promise<void>;
   readonly signOut: () => Promise<void>;
   readonly manageUsage: () => Promise<void>;
 }
@@ -28,13 +33,14 @@ export interface ChatGPTAccount {
 /** The ChatGPT sign-in as Track with AI shows it. A cancelled sign-in says nothing. */
 export function useChatGPTAccount(): ChatGPTAccount {
   const status = useChatGPTSessionStatus();
+  const hasSavedAccount = useHasSavedChatGPTAccount();
   const [note, setNote] = useState<string | null>(null);
 
-  const signIn = async () => {
+  const startSignIn = async (newAccount: boolean) => {
     setNote(null);
 
     try {
-      await signInWithChatGPT();
+      await signInWithChatGPT({ newAccount });
     } catch (error) {
       setNote(signInFailedCopy(error instanceof ChatGPTAuthError ? error.kind : 'failed'));
     }
@@ -59,5 +65,13 @@ export function useChatGPTAccount(): ChatGPTAccount {
     }
   };
 
-  return { status, note, signIn, signOut, manageUsage };
+  return {
+    status,
+    hasSavedAccount,
+    note,
+    signIn: () => startSignIn(false),
+    signInWithAnotherAccount: () => startSignIn(true),
+    signOut,
+    manageUsage,
+  };
 }

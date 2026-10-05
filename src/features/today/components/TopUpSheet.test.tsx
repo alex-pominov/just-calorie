@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import type { PropsWithChildren } from 'react';
+import * as Haptics from 'expo-haptics';
 import { findNodeHandle, Pressable, Text, TextInput, View } from 'react-native';
 
 import type { Database } from '@/modules/database';
@@ -13,6 +14,12 @@ import type { NodeSqliteDatabase, TemporaryDatabaseFile } from '@tests/node-sqli
 import { createTemporaryDatabaseFile, openNodeSqliteDatabase } from '@tests/node-sqlite-database';
 
 import { TopUpSheet } from './TopUpSheet';
+
+jest.mock('expo-haptics', () => ({
+  selectionAsync: jest.fn(() => Promise.resolve()),
+  impactAsync: jest.fn(() => Promise.resolve()),
+  ImpactFeedbackStyle: { Light: 'light', Medium: 'medium', Heavy: 'heavy', Rigid: 'rigid', Soft: 'soft' },
+}));
 
 // react-native exports these lazily, so touching them here loads their modules while the file is set up, which no
 // timeout covers; findNodeHandle loads react-native's renderer, the largest of them. Under host load that cold load,
@@ -83,6 +90,50 @@ describe('TopUpSheet', () => {
 
     await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
     expect(await today()).toMatchObject({ entriesTotalKcal: 250 });
+  });
+
+  describe('haptics', () => {
+    // A haptic plays a task later than the store that asked for it.
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+    it('taps once with a light impact after an addition is stored', async () => {
+      await render(<TopUpSheet dayKey={toDayKey(new Date())} onDone={onDone} />, { wrapper });
+
+      await fireEvent.changeText(amount(), '250');
+      await fireEvent.press(confirm());
+      await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
+      await settle();
+
+      expect(jest.mocked(Haptics.impactAsync).mock.calls).toEqual([[Haptics.ImpactFeedbackStyle.Light]]);
+    });
+
+    it('does not tap for a removal', async () => {
+      await eat(300);
+      await render(<TopUpSheet dayKey={toDayKey(new Date())} onDone={onDone} />, { wrapper });
+
+      await fireEvent.press(screen.getByRole('button', { name: 'Remove' }));
+      await waitFor(() => expect(amountAccepts('100')).toBe(true));
+      await fireEvent.press(confirm());
+      await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
+      await settle();
+
+      expect(Haptics.impactAsync).not.toHaveBeenCalled();
+    });
+
+    it('does not tap when the addition cannot be stored', async () => {
+      jest.spyOn(console, 'error').mockImplementation(() => {});
+      const real = database;
+      database = { ...real, write: jest.fn(() => Promise.reject(new Error('database or disk is full'))) };
+      await render(<TopUpSheet dayKey={toDayKey(new Date())} onDone={onDone} />, { wrapper });
+
+      await fireEvent.changeText(amount(), '250');
+      await fireEvent.press(confirm());
+      expect(await screen.findByText("Couldn't save. Try again.")).toBeOnTheScreen();
+      await settle();
+
+      expect(Haptics.impactAsync).not.toHaveBeenCalled();
+      database = real;
+    });
   });
 
   it('stores a removal from the Remove tab, shown with a minus sign', async () => {

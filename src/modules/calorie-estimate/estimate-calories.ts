@@ -1,11 +1,14 @@
-import type { CalorieEstimate, CalorieEstimateRequest, EstimateCredential, EstimateErrorKind, EstimateOptions } from './calorie-estimate.types';
+import type { CalorieEstimate, CalorieEstimateRequest, EstimateErrorKind, EstimateOptions } from './calorie-estimate.types';
 import { EstimateError } from './estimate-error';
 import { chooseEstimateModel, MODELS_PATH } from './openai-models';
-import { buildEstimateRequestBody, ESTIMATE_MODEL, hasEstimateInput, RESPONSES_PATH } from './openai-request';
+import { buildEstimateRequestBody, hasEstimateInput, RESPONSES_PATH } from './openai-request';
 import { parseEstimateStream } from './openai-stream';
 
 /** A photo upload on a slow mobile network is the long case; past this the request counts as 'network'. */
 export const ESTIMATE_TIMEOUT_MS = 45_000;
+
+/** Every estimate goes to OpenAI's API on the signed-in user's ChatGPT plan. */
+const OPENAI_BASE_URL = 'https://api.openai.com/v1';
 
 // The part of a fetch Response the estimator reads, so a test can hand over a plain object.
 type HttpResponse = { readonly ok: boolean; readonly status: number; json(): Promise<unknown>; text(): Promise<string> };
@@ -14,21 +17,20 @@ type Send = (url: string, init: RequestInit) => Promise<HttpResponse>;
 type Read = <R>(body: Promise<R>, kind: 'network' | 'invalid-response') => Promise<R>;
 
 export type EstimatorDependencies = {
-  readonly getCredential: () => Promise<EstimateCredential | null>;
+  /** The signed-in user's ChatGPT access token; null when nobody is signed in. */
+  readonly getCredential: () => Promise<string | null>;
   /** OpenAI refused this ChatGPT token: drop it so the next `getCredential` refreshes. */
-  readonly onCredentialRejected: (credential: EstimateCredential) => void;
-  readonly getBaseUrl: () => string;
+  readonly onCredentialRejected: (token: string) => void;
   readonly fetch: FetchLike;
   readonly timeoutMs?: number;
 };
 
-// The error body is never read: OpenAI's 401 quotes the key it was sent. On the ChatGPT plan route a 429 is the plan's
+// The error body is never read: OpenAI's 401 quotes the token it was sent. On the ChatGPT plan route a 429 is the plan's
 // usage limit and a 403 a plan, workspace or region that may not be used here, which retrying cannot change
-// (developers.openai.com/siwc/token-sharing-open-source/errors-and-recovery). On the key route both are ordinary.
+// (developers.openai.com/siwc/token-sharing-open-source/errors-and-recovery).
 const PLAN_ROUTE_KINDS: Partial<Record<number, EstimateErrorKind>> = { 403: 'plan-unavailable', 429: 'usage-limit' };
 
-const httpError = (status: number, route: EstimateCredential['kind']) =>
-  new EstimateError((route === 'chatgpt-plan' ? PLAN_ROUTE_KINDS[status] : undefined) ?? 'api', { status });
+const httpError = (status: number) => new EstimateError(PLAN_ROUTE_KINDS[status] ?? 'api', { status });
 
 // One timeout covers the whole exchange, the model lookup and the streamed body included, and a timeout always reads
 // as 'network'. A caller's own abort is rethrown as it is, so the caller can tell "I stopped it" from a failure.
@@ -63,29 +65,28 @@ async function withDeadline<T>(
   }
 }
 
-/** Builds `estimateCalories` over an injected credential, base URL and fetch, so tests never reach the network. */
+/** Builds `estimateCalories` over an injected credential and fetch, so tests never reach the network. */
 export function createEstimateCalories(dependencies: EstimatorDependencies) {
   // A ChatGPT account's catalog changes rarely; it is asked again when the token rotates, about hourly.
   let planModel: { readonly token: string; readonly model: string } | null = null;
 
-  async function modelFor(credential: EstimateCredential, baseUrl: string, send: Send, read: Read): Promise<string> {
-    if (credential.kind === 'api-key') return ESTIMATE_MODEL;
-    if (planModel?.token === credential.token) return planModel.model;
+  async function modelFor(token: string, send: Send, read: Read): Promise<string> {
+    if (planModel?.token === token) return planModel.model;
 
-    const catalog = await send(`${baseUrl}${MODELS_PATH}`, {
+    const catalog = await send(`${OPENAI_BASE_URL}${MODELS_PATH}`, {
       method: 'GET',
-      headers: { Accept: 'application/json', Authorization: `Bearer ${credential.token}` },
+      headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
     });
 
-    if (!catalog.ok) throw httpError(catalog.status, credential.kind);
+    if (!catalog.ok) throw httpError(catalog.status);
 
     const model = chooseEstimateModel(await read(catalog.json(), 'invalid-response'));
-    planModel = { token: credential.token, model };
+    planModel = { token, model };
 
     return model;
   }
 
-  async function requireCredential(): Promise<EstimateCredential> {
+  async function requireCredential(): Promise<string> {
     const credential = await dependencies.getCredential();
 
     if (credential === null) throw new EstimateError('missing-auth');
@@ -93,25 +94,23 @@ export function createEstimateCalories(dependencies: EstimatorDependencies) {
     return credential;
   }
 
-  function estimateWith(credential: EstimateCredential, request: CalorieEstimateRequest, signal: AbortSignal | undefined) {
-    const baseUrl = dependencies.getBaseUrl();
-
+  function estimateWith(token: string, request: CalorieEstimateRequest, signal: AbortSignal | undefined) {
     return withDeadline(dependencies, signal, async (send, read) => {
-      const model = await modelFor(credential, baseUrl, send, read);
-      const response = await send(`${baseUrl}${RESPONSES_PATH}`, {
+      const model = await modelFor(token, send, read);
+      const response = await send(`${OPENAI_BASE_URL}${RESPONSES_PATH}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', Authorization: `Bearer ${credential.token}` },
-        body: JSON.stringify(buildEstimateRequestBody(request, { model, route: credential.kind })),
+        headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(buildEstimateRequestBody(request, { model })),
       });
 
-      if (!response.ok) throw httpError(response.status, credential.kind);
+      if (!response.ok) throw httpError(response.status);
 
       return parseEstimateStream(await read(response.text(), 'network'));
     });
   }
 
   // A caller that stopped the request while its credential was fetched gets its abort back, never an EstimateError.
-  async function credentialFor(signal: AbortSignal | undefined): Promise<EstimateCredential> {
+  async function credentialFor(signal: AbortSignal | undefined): Promise<string> {
     try {
       return await requireCredential();
     } catch (error) {
@@ -128,7 +127,7 @@ export function createEstimateCalories(dependencies: EstimatorDependencies) {
     try {
       return await estimateWith(credential, request, options.signal);
     } catch (error) {
-      const refused = error instanceof EstimateError && error.status === 401 && credential.kind === 'chatgpt-plan';
+      const refused = error instanceof EstimateError && error.status === 401;
 
       if (!refused) throw error;
 

@@ -1,24 +1,34 @@
 # `modules/chatgpt-auth`
 
-Sign in with ChatGPT: the user's own OpenAI OAuth sign-in (a public client with PKCE), its tokens in the iOS
-Keychain, refresh, and sign-out. **This is the only code that touches a ChatGPT token or the Keychain.** It imports
-no feature, and lint keeps `expo-secure-store` and `expo-auth-session` inside it.
+Sign in with ChatGPT, as OpenAI documents it for open-source apps: each account's first sign-in on a phone
+registers that account's own OAuth client, its tokens live in the iOS Keychain, and refresh and sign-out use that
+client. **This is the only code that touches a ChatGPT token or the Keychain.** It imports no feature, and lint keeps
+`expo-secure-store` and `expo-auth-session` inside it. No build carries a client, a key or any setting for it.
 
 ## Public API (`index.ts`)
 
 - `useChatGPTSessionStatus()` is `'loading' | 'signed-out' | 'signing-in' | 'signing-out' | 'signed-in'`. The first render
   reads the Keychain; `'signing-out'` lasts until OpenAI and the Keychain have let go.
-- `signInWithChatGPT()` opens OpenAI's sign-in in an iOS auth session and resolves `'signed-in'` or `'cancelled'`.
-- `signOutOfChatGPT()` stops handing out the token at once, waits for a sign-in or refresh in flight, revokes the
-  refresh token at OpenAI, then deletes the session from the Keychain. It resolves `{ revoked }`; `revoked: false`
-  means OpenAI did not confirm, and the device is signed out anyway. If the Keychain item cannot be deleted and
-  OpenAI did not confirm the revocation, the device is still signed in, so the session is put back and the call
-  throws `failed`; once OpenAI has confirmed it, its tokens are never handed out again: an item the Keychain will not delete is rewritten
-  as expired, so the next launch refreshes it first and OpenAI refuses it. Only a Keychain that refuses both the delete
-  and the rewrite keeps a usable item, which the next launch uses until it nears expiry. Taps that arrive together
-  share one sign-out, as they share one sign-in. A sign-in asked for while a sign-out is under way waits for it, so
-  the sign-out never deletes the new session's item (qa f-463b39); each waits only for the other already under way
-  when it was asked for.
+- `useHasSavedChatGPTAccount()` is true once an account has registered on this phone. A plain sign-in then reuses
+  that account's client, and the UI can offer to add another account.
+- `signInWithChatGPT(options?)` opens OpenAI's sign-in in an iOS auth session and resolves `'signed-in'` or
+  `'cancelled'`. It reuses the account signed in last, or registers the first one. `{ newAccount: true }` registers
+  another ChatGPT account instead.
+- `signOutOfChatGPT()` stops handing out the token at once and waits for a sign-in or refresh in flight. It then clears
+  every token from the Keychain first, so a phone quit mid-sign-out relaunches signed out, and only then revokes the
+  refresh token, which it now holds in memory alone, at OpenAI with the account's own client. The account's
+  registration and this install's host ID stay. A revocation OpenAI could not answer (no response, or a 5xx) is
+  retried after 1 s and then 2 s. Each attempt is limited to 4 s, so the whole revocation ends within 15 s, still
+  reading as signing out. A 4xx is final (accounts and sessions, "End the renewable session"; qa f-3d8e7d). It resolves
+  `{ revoked }`; `revoked: false` means OpenAI did not confirm, and the device is signed out anyway. If the Keychain will
+  not take the signed-out item and OpenAI did not confirm the revocation, the device is still signed in, so the session
+  is put back and the call throws `failed`. Once OpenAI has confirmed it, its tokens are never handed out again: an
+  item the Keychain will not rewrite is deleted, registration and all, and one it will not delete either is rewritten
+  as expired, so the next launch refreshes it first and OpenAI refuses it. Only a Keychain that refuses every write and
+  the delete keeps a usable item, which the next launch uses until it nears expiry. Taps that arrive together share
+  one sign-out, as they share one sign-in. A sign-in asked for while a sign-out is under way waits for it, so the
+  sign-out never overwrites the new session (qa f-463b39); each waits only for the other already under way when it
+  was asked for.
 - `getChatGPTAccessToken()` is the signed-in user's access token, refreshed first when it is within five minutes of
   expiry, or `null` when nobody is signed in on this device. A refresh that cannot reach OpenAI keeps a token that
   has not expired yet. `modules/calorie-estimate` is its one caller.
@@ -30,96 +40,132 @@ no feature, and lint keeps `expo-secure-store` and `expo-auth-session` inside it
 
   | `kind` | When |
   | --- | --- |
-  | `unavailable` | the build has no client ID; no browser opens |
+  | `unavailable` | the build has no sign-in callback listener (`modules/loopback-callback`), such as Expo Go; no browser opens |
   | `denied` | the user declined on OpenAI's consent page |
-  | `plan-not-allowed` | the user signed in but did not allow ChatGPT plan use; nothing is kept |
+  | `plan-not-allowed` | the user signed in but did not allow ChatGPT plan use; no token is kept, but the account's client is, marked declined, so the next sign-in reuses it and asks for consent again |
+  | `another-account` | a saved account's sign-in was answered by another ChatGPT account (another `sub`, or a callback naming another client); nothing is replaced, and the copy points at Use a different ChatGPT account |
   | `network` | OpenAI's token endpoint did not answer, or not within 30 s; on a refresh, also HTTP 408, 429 or 5xx |
-  | `failed` | anything else: a code exchange answered with any non-2xx, a callback for another attempt or client, a bad token response, a Keychain error |
+  | `failed` | anything else: no callback within 5 minutes, a callback for another attempt, a first registration whose callback names no issued client, a code exchange answered with any non-2xx, a bad token response, a Keychain error |
 
   Messages are fixed text. No token, code or response body reaches one, and the module logs nothing.
 
-## Whose account pays
+## How a sign-in runs
 
-Every token comes from the signing-in user's own consent and lives only in that device's Keychain. A client ID is a
-public identifier that grants nothing by itself.
+OpenAI's pages are cited by section; each was read on 2026-10-05. "Sign-in" is
+<https://developers.openai.com/siwc/token-sharing-open-source/sign-in>, "accounts and sessions" is
+<https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions>, and "errors and recovery" is
+<https://developers.openai.com/siwc/token-sharing-open-source/errors-and-recovery>.
 
-| Build | Client | Redirect sent to OpenAI |
-| --- | --- | --- |
-| production | `CHATGPT_CLIENT_ID`, an app-wide client OpenAI provisions | `justcalorie://auth/callback` |
-| development | `CHATGPT_DEV_CLIENT_ID`, else `CHATGPT_CLIENT_ID` | `CHATGPT_DEV_REDIRECT_URI`, else the app callback |
+1. **The listener first.** A one-time HTTP listener starts on the phone's `127.0.0.1`, through
+   `loopback-callback.ts` over `modules/loopback-callback`. OpenAI accepts only
+   `http://127.0.0.1:<port>/auth/callback`, "only the port may vary", and asks to "start the listener before opening
+   the browser" (sign-in, §2). It tries port 1455 and takes any free port when that one is busy. The redirect sent is
+   built from the port it actually bound.
+2. **The authorize request** (sign-in, §2) carries the plan scopes, `resource`, a fresh `state`, `nonce` and PKCE S256,
+   and this install's `ext_agent_host_id`. A **first registration** sends `client_id=dynamic_agent_client` and
+   `agent_name_hint=Just Calorie`. A **saved account** sends its own issued client and `login_hint` with its email,
+   and no agent name. It sends no `id_token_hint`, because sign-out deletes the ID token.
+3. **The callback.** The auth sheet watches for no URL, since an auth session cannot catch an `http` redirect. The
+   listener answers OpenAI's redirect with a page saying the sheet can be closed, and the sheet is then dismissed. A
+   user who closes the sheet cancels the sign-in. The listener closes on every path.
+4. **The issued client** (sign-in, §3). A first registration must name its issued `oaiapp_` client, and anything else
+   is refused before a code is redeemed ("treat registration as incomplete"). A saved account's callback may omit
+   it, but may never name another.
+5. **The exchange** uses the issued client, the verifier and the same redirect (sign-in, §3).
+6. **The ID token** is checked for issuer, audience (the issued client), nonce and expiry, and its `sub` is the
+   account (sign-in, §4). A saved account's sign-in answered by another `sub` is refused, and what it issued is
+   revoked: "confirm the new ID token's verified identity matches the selected account before replacing credentials"
+   (accounts and sessions). Plan use needs `chatgpt.tokens.use.direct` in the **granted** scopes.
+7. **Kept, or ended.** The account's registration, `lastSubject` and the session are written as one item. Any token
+   OpenAI issued that the app will not keep is revoked with the client it was issued to. That covers a sign-in that
+   grants no plan use, fails the ID-token check or cannot be stored; a refresh that lands after the session was
+   replaced or ended, or that took plan use away (qa f-f97276); and a version-1 item's session (below).
 
-`app.config.js` includes `CHATGPT_DEV_CLIENT_ID`, `CHATGPT_DEV_REDIRECT_URI` and `OPENAI_API_KEY` only in the config
-the dev server serves: `bun start` sets `JUST_CALORIE_DEV_SERVER=1`, and `NODE_ENV` must also be `development`.
-`NODE_ENV` alone is not enough, because `expo config` sets it to `development` too, and `eas update` builds its
-manifest with `expo config`. Any other config also drops a `CHATGPT_CLIENT_ID` equal to `CHATGPT_DEV_CLIENT_ID`,
-because a native build reads `.env` and would otherwise embed the owner's client (`src/config/app-config.test.ts`;
-measured 2026-10-05: before this, a native build embedded the owner's client whenever `.env` set both to it, and an
-`eas update` run from a shell or EAS environment that held these variables would publish all three; after it, 0
-hits on each path). The app also ignores a loopback redirect outside a
-development bundle. A session another client signed in, such as a development build's on the same phone, is deleted
-on load and never used, even by a build that has no client of its own yet.
+**Sign-out** follows accounts and sessions, "Sign out": "Stop requests. Attempt End the renewable session … before
+clearing the selected account's access, refresh, and ID tokens. Retain its account/client mapping and this host's ID
+for a later sign-in." So "signing out or switching back to a saved ChatGPT account does not create a new client".
+A client ID on its own grants nothing.
 
-Any token OpenAI issued that the app will not keep is revoked: a sign-in that grants no plan use, fails the ID-token
-check or cannot be stored, a refresh that lands after the session was replaced or ended or that took plan use away
-(qa f-f97276), and a stored session that belongs to another client.
+**Refresh** uses the session's issued client, never `dynamic_agent_client`, and is serialised, because refresh
+tokens rotate (accounts and sessions, "Refreshing tokens"). A refresh OpenAI refuses for good clears the tokens and
+keeps the registration, so the next sign-in reauthorizes with the saved client (errors and recovery, "Refresh
+errors": "Clear unusable tokens and repeat OAuth with the saved issued client ID").
+
+**A declined plan use** (errors and recovery, "ChatGPT plan use isn't enabled"). A validated account whose grant lacks
+`chatgpt.tokens.use.direct` has its tokens revoked, and its issued client is saved and marked as declined. The next
+Continue repeats OAuth with that client and the complete scope set, and adds `prompt=consent` only because of the mark.
+A refresh that comes back without the scope, after the user turned plan use off in ChatGPT's settings, ends the
+session and sets the same mark (qa f-39f149). The rule against forcing consent still holds:
+"Your app should not force consent on every ordinary sign-in." Each retry therefore reuses one client instead of
+registering another. An `access_denied` callback that names an issued client is not kept. It carries no ID token,
+so there is no `sub` to key the client by.
+
+**Another account** (accounts and sessions, "Switching ChatGPT accounts"). `{ newAccount: true }` registers through
+`dynamic_agent_client` again. Registrations are kept by `sub`, and one account's client is never paired with another's
+tokens. An account that registers again replaces its own mapping. The UI has one pill, which reuses the account signed
+in last, and one link to add another. There is no account list.
 
 ## The Keychain
 
+- **One item, `chatgpt.session`,** holds everything as one JSON value, so a crash can never leave tokens beside the
+  wrong client, or half a token pair. Format version 2:
+
+  ```json
+  {
+    "version": 2,
+    "registrations": [{ "clientId": "oaiapp_…", "subject": "<sub>", "email": "… or null", "planDeclined": true }],
+    "lastSubject": "<sub>",
+    "session": { "clientId": "oaiapp_…", "subject": "<sub>", "accessToken": "…", "refreshToken": "…", "expiresAtMs": 0, "scopes": [] }
+  }
+  ```
+
+  `session` is `null` when signed out. `planDeclined` is present only after the account declined plan use, and is
+  cleared by the next sign-in that grants it. A session whose client is not its account's registered one is read as no
+  session. The ID token is not kept, because nothing reuses it.
+- **A version-1 item** held a session of the app-wide client earlier builds used. It is revoked with that client and
+  deleted on load, and the user registers their own. Any other unreadable item reads as nothing saved.
+- `chatgpt.host-id` holds this install's opaque `urn:uuid:` host ID, which every authorize request carries. It is not
+  a credential, and sign-out keeps it, as OpenAI's docs ask.
 - The Keychain is read once, on first use. A read that fails (a locked phone) is retried on the next call rather than
   remembered as signed out.
-- One item, `chatgpt.session`, holds the client ID, both tokens, the expiry and the granted scopes as one JSON value,
-  so a crash cannot leave half a token pair. It carries a format version; an item of another version reads as no
-  session.
-- `chatgpt.host-id` holds this install's opaque `urn:uuid:` host ID, which OpenAI's plan-usage flow asks for on every
-  sign-in. It is not a credential, and sign-out keeps it, as OpenAI's docs ask.
-- Both are `WHEN_UNLOCKED_THIS_DEVICE_ONLY`: readable only while the phone is unlocked, never restored onto another
-  device from a backup. The iOS Keychain outlives an uninstall, so a reinstall on the same phone can still be signed
-  in.
+- Both items are `WHEN_UNLOCKED_THIS_DEVICE_ONLY`: readable only while the phone is unlocked, and never restored onto
+  another device from a backup. The iOS Keychain outlives an uninstall, so a reinstall on the same phone can still be
+  signed in.
+- Nothing about the client, the account or a token goes anywhere else: not the app config, SQLite, a log or an error.
 - No config plugin is added. `expo-secure-store`'s only adds a Face ID purpose string, which nothing here uses, and
-  `expo-web-browser`'s does nothing on iOS.
+  `expo-web-browser`'s does nothing on iOS. The listener needs no Info.plist key, because Safari's auth session, not the
+  app, loads the loopback page.
 
-## External constraints (probed 2026-10-04)
+## External constraints
 
-Each conclusion is a ledger finding on workstream `sign-in-with-chatgpt`, with its source.
-
-- **Availability.** ChatGPT plan usage is self-serve only for open-source and locally run apps. A closed-source App
-  Store app needs OpenAI to select it through the interest form,
-  <https://openai.com/form/sign-in-with-chatgpt-interest/> ([quickstart](https://developers.openai.com/siwc/quickstart)).
-  **Until it does, a production build has no client: Continue with ChatGPT reports that sign-in is unavailable, and no
-  estimate runs.** That form is the one remaining production step.
-- **The contract** ([sign-in](https://developers.openai.com/siwc/token-sharing-open-source/sign-in),
-  [token reference](https://developers.openai.com/siwc/token-sharing-open-source/token-reference)): scopes
-  `openid profile email offline_access resource.invoke chatgpt.tokens.use.direct`, `resource=https://api.openai.com/v1`
-  on the authorize, exchange and refresh requests, PKCE S256, no secret. Access tokens last an hour; refresh tokens 30
-  days and rotate on every refresh, which is why refreshes are serialised. A result without
-  `chatgpt.tokens.use.direct` in the granted scopes may not use the plan.
-- **The ID token** is checked for issuer, audience, nonce and expiry. Its signature is not, which departs from
-  OpenAI's sign-in page (it asks for verification against OpenAI's JWKS): the token arrives straight from the token
-  endpoint over TLS, which OpenID Connect Core §3.1.3.7 accepts instead, and the app uses no identity claim from it.
+- **Availability.** ChatGPT plan usage is self-serve for open-source and locally hosted apps
+  (<https://developers.openai.com/siwc/token-sharing-open-source>). A paid or remotely hosted app would need OpenAI's
+  interest form instead. This repository is open source, so no form or OpenAI-issued client is involved.
+- **The contract** (sign-in; [token reference](https://developers.openai.com/siwc/token-sharing-open-source/token-reference)):
+  scopes `openid profile email offline_access resource.invoke chatgpt.tokens.use.direct`,
+  `resource=https://api.openai.com/v1` on the authorize, exchange and refresh requests, PKCE S256, and no secret.
+  Access tokens last an hour. Refresh tokens last 30 days and rotate on every refresh.
+- **The ID token's signature is not checked.** This departs from sign-in, §4, which asks for verification against
+  OpenAI's JWKS. The token arrives straight from the token endpoint over TLS, which OpenID Connect Core §3.1.3.7
+  accepts instead, and the app uses only `sub` and `email` from it, to tell accounts apart.
+- **A dead client.** A refresh, or a saved account's code exchange, that OpenAI answers with `invalid_client` drops
+  that account's registration (errors and recovery, "Invalid client"), so the next Continue registers a new client.
+  Only the OAuth `error` code is read from a refusal, never the rest of its body. Any other refusal keeps the client.
 - **The plan route's own shape** (measured 2026-10-04 on the owner's account): `GET /v1/models` answers
   `{ models: [...] }`, and a streamed `response.completed` carries an empty `output`, the message arriving only in
   `response.output_item.done` (`modules/calorie-estimate`).
 - **iOS's URL cache** would otherwise write these requests, with their `Authorization` header, and the token
   endpoint's response, with its tokens, into `Library/Caches/<bundle id>/Cache.db`, an SQLite file (measured). A
   request header does not stop it, so `plugins/with-no-http-cache.js` gives the app a zero-capacity cache at launch.
-- **The self-serve client is bound to the user who registered it** and accepts only a loopback redirect,
-  `http://127.0.0.1:<port>/auth/callback`; it refuses `justcalorie://` with `param: redirect_uri` (measured). So the
-  owner's own client is a development client, and per-install self-registration would need an in-app HTTP listener
-  (a native module) and OpenAI's permission, which a closed-source app does not have.
 
 ## Signing in on the simulator
 
-The development client's only redirect is the loopback, and on the simulator `127.0.0.1` is the Mac. So:
-
-1. `node scripts/chatgpt-loopback-relay.mjs` (it reads `CHATGPT_DEV_REDIRECT_URI` from `.env`);
-2. tap Continue with ChatGPT and sign in.
-
-OpenAI redirects to the relay, which redirects the auth session to `justcalorie://auth/callback`; the app redeems the
-code with its own PKCE verifier, which the relay never sees. This works on the simulator only: on an iPhone,
-`127.0.0.1` is the phone.
+Nothing to set up. On the simulator `127.0.0.1` is the Mac, so the app's listener binds the Mac's loopback for the
+length of a sign-in, and `lsof -nP -iTCP -sTCP:LISTEN` shows it there.
 
 ## Tests
 
 Every collaborator is injected through `createChatGPTAuth`: an in-memory Keychain, a routed fake fetch, a fake
-browser and a clock. `authorize.test.ts` runs the real `AuthRequest` over node's crypto to check the authorize URL
-OpenAI receives.
+authorize, and a clock. `authorize.test.ts` runs the real `AuthRequest` over node's crypto against a fake listener, to
+check the authorize URL OpenAI receives, the sheet's handling and the listener's lifetime. `loopback-callback.test.ts`
+drives the boundary over a fake native module. `scripts/probe-loopback-listener.sh` exercises the Swift listener itself.

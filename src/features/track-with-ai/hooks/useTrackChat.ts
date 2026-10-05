@@ -2,6 +2,7 @@ import { useEffect, useReducer, useRef } from 'react';
 
 import { estimateCalories } from '@/modules/calorie-estimate';
 import { useAddEntry } from '@/features/tracking';
+import { playLightImpactHaptic } from '@/modules/haptics';
 
 import { canAdd, chatErrorKindOf, chatReducer, isAwaitingReply } from '../services/track-chat.service';
 import type { AiMessage, ChatDraft, ChatMessage } from '../types/track-chat.types';
@@ -71,6 +72,7 @@ export function useTrackChat(dayKey: string): TrackChat {
 
     try {
       await addEntry({ dayKey, kind: 'add', kcal: message.kcal });
+      playLightImpactHaptic();
       dispatch({ type: 'add-succeeded', replyId: message.id });
     } catch {
       dispatch({ type: 'add-failed', replyId: message.id });

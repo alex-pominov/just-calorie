@@ -40,7 +40,7 @@ const devClientPluginsOf = (config: { plugins?: unknown[] }) =>
   (config.plugins ?? []).filter((plugin) => (Array.isArray(plugin) ? plugin[0] : plugin) === 'expo-dev-client');
 
 describe('app config', () => {
-  it('opens a development build straight into this worktree’s Metro, with no tools button or launcher', () => {
+  it('opens a development build straight into its slot’s Metro, with no tools button or launcher', () => {
     const config = configFor({ NODE_ENV: 'development', STUDIO_SLOT: '33' });
 
     expect(devClientPluginsOf(config)).toEqual([
@@ -70,98 +70,34 @@ describe('app config', () => {
   });
 
   describe('the AI credentials', () => {
-    const DEV_KEY = 'sk-dev-FAKE-0123456789';
-    const OWNER_DEV_CLIENT = 'oaiapp_owner_dev';
-    const LOOPBACK = 'http://127.0.0.1:1455/auth/callback';
-    const DEV_SERVER: BuildEnv = { JUST_CALORIE_DEV_SERVER: '1' };
-    const credentials: BuildEnv = {
-      OPENAI_API_KEY: DEV_KEY,
-      CHATGPT_DEV_CLIENT_ID: OWNER_DEV_CLIENT,
-      CHATGPT_DEV_REDIRECT_URI: LOOPBACK,
+    // Variables older builds read: a development OpenAI key, a base-URL override, the flag that marked the dev server,
+    // and an app-wide ChatGPT client. Each user now registers their own client, so none may reach any config.
+    const RETIRED_VALUES: BuildEnv = {
+      OPENAI_API_KEY: 'sk-dev-FAKE-0123456789',
+      CALORIE_ESTIMATE_BASE_URL: 'http://127.0.0.1:9',
       CHATGPT_CLIENT_ID: 'oaiapp_app_wide',
+      CHATGPT_DEV_CLIENT_ID: 'oaiapp_owner_dev',
+      CHATGPT_DEV_REDIRECT_URI: 'http://127.0.0.1:1455/auth/callback',
     };
 
-    it("gives the dev server the dev key and the owner's dev client on its loopback redirect", () => {
-      const config = configFor({ NODE_ENV: 'development', ...DEV_SERVER, ...credentials });
-
-      expect(config.extra?.calorieEstimate).toMatchObject({ apiKey: DEV_KEY });
-      expect(config.extra?.chatgptAuth).toEqual({ clientId: OWNER_DEV_CLIENT, redirectUri: LOOPBACK });
-    });
-
-    it('falls back to the app-wide client on the dev server when no dev client is set', () => {
-      const config = configFor({ NODE_ENV: 'development', ...DEV_SERVER, CHATGPT_CLIENT_ID: 'oaiapp_app_wide' });
-
-      expect(config.extra?.chatgptAuth).toEqual({ clientId: 'oaiapp_app_wide' });
-    });
-
-    it("publishes none of the owner's credentials in an 'eas update' manifest, which 'expo config' evaluates as development", () => {
-      const config = configFor({ NODE_ENV: 'development', ...credentials });
+    it.each<BuildEnv>([
+      { NODE_ENV: 'development' },
+      { NODE_ENV: 'production' },
+      { EAS_BUILD_PROFILE: 'production' },
+      {},
+    ])('carries no key, no base-URL override and no client, whatever the environment sets (%p)', (env) => {
+      const config = configFor({ ...env, JUST_CALORIE_DEV_SERVER: '1', ...RETIRED_VALUES });
       const everything = JSON.stringify(config);
 
-      expect(everything).not.toContain(DEV_KEY);
-      expect(everything).not.toContain(OWNER_DEV_CLIENT);
-      expect(everything).not.toContain(LOOPBACK);
+      expect(config.extra).not.toHaveProperty('calorieEstimate');
+      expect(config.extra).not.toHaveProperty('chatgptAuth');
+      Object.values(RETIRED_VALUES).forEach((value) => expect(everything).not.toContain(value));
     });
 
-    it.each<BuildEnv>([{ NODE_ENV: 'production' }, { EAS_BUILD_PROFILE: 'production' }, {}, { NODE_ENV: 'development' }])(
-      "never ships the owner's dev client as the app-wide client when both are set to it (%p)",
-      (env) => {
-        const config = configFor({ ...env, CHATGPT_DEV_CLIENT_ID: OWNER_DEV_CLIENT, CHATGPT_CLIENT_ID: OWNER_DEV_CLIENT });
-
-        expect(config.extra?.chatgptAuth).toEqual({});
-        expect(JSON.stringify(config)).not.toContain(OWNER_DEV_CLIENT);
-      },
-    );
-
-    it.each<BuildEnv>([
-      { CHATGPT_DEV_CLIENT_ID: OWNER_DEV_CLIENT, CHATGPT_CLIENT_ID: ` ${OWNER_DEV_CLIENT}\n` },
-      { CHATGPT_DEV_CLIENT_ID: ` ${OWNER_DEV_CLIENT} `, CHATGPT_CLIENT_ID: OWNER_DEV_CLIENT },
-    ])("never ships the owner's dev client when one copy is padded with whitespace, as the app reads it trimmed (%p)", (clients) => {
-      const config = configFor({ NODE_ENV: 'production', ...clients });
-
-      expect(config.extra?.chatgptAuth).toEqual({});
-      expect(JSON.stringify(config)).not.toContain(OWNER_DEV_CLIENT);
-    });
-
-    it('marks the dev server in the start script, and keeps Metro on localhost', () => {
+    it('keeps Metro on 127.0.0.1, IPv4 first, with no dev-server flag left in the start script', () => {
       const start = /"start":\s*"([^"]*)"/.exec(readFileSync(join(__dirname, '../../package.json'), 'utf8'))?.[1] ?? '';
 
-      expect(start).toMatch(/(^|\s)JUST_CALORIE_DEV_SERVER=1\s.*expo start --localhost/);
-    });
-
-    it.each<BuildEnv>([{ NODE_ENV: 'production' }, { EAS_BUILD_PROFILE: 'production' }])(
-      "ships a production build with no API key and no owner client, only the app-wide client (%p)",
-      (env) => {
-        const config = configFor({ ...env, ...credentials });
-        const everything = JSON.stringify(config);
-
-        expect(config.extra?.chatgptAuth).toEqual({ clientId: 'oaiapp_app_wide' });
-        expect(everything).not.toContain(DEV_KEY);
-        expect(everything).not.toContain(OWNER_DEV_CLIENT);
-        expect(everything).not.toContain(LOOPBACK);
-      },
-    );
-
-    it('gives a build that does not say it is development, such as an Xcode archive, none of the owner’s credentials', () => {
-      const config = configFor(credentials);
-      const everything = JSON.stringify(config);
-
-      expect(everything).not.toContain(DEV_KEY);
-      expect(everything).not.toContain(OWNER_DEV_CLIENT);
-      expect(everything).not.toContain(LOOPBACK);
-    });
-
-    it('keeps the base URL override out of a production build, since every request there carries a user token', () => {
-      const config = configFor({ NODE_ENV: 'production', CALORIE_ESTIMATE_BASE_URL: 'http://127.0.0.1:9' });
-
-      expect(JSON.stringify(config)).not.toContain('127.0.0.1:9');
-    });
-
-    it('ships a production build with no client at all when no app-wide client is set', () => {
-      const config = configFor({ NODE_ENV: 'production', OPENAI_API_KEY: DEV_KEY, CHATGPT_DEV_CLIENT_ID: OWNER_DEV_CLIENT });
-
-      expect(config.extra?.chatgptAuth).toEqual({});
-      expect(config.extra?.calorieEstimate).not.toHaveProperty('apiKey');
+      expect(start).toBe('NODE_OPTIONS=--dns-result-order=ipv4first expo start --localhost');
     });
   });
 

@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -17,13 +18,15 @@ interface ChatInputRowProps {
   canSend: boolean;
   onSend: () => void;
   onAttach: () => void;
+  /** Drawn under the field, inside the home-indicator padding (Figma 24:4327's 'Sign Out from GPT'). */
+  footer?: ReactNode | undefined;
 }
 
 /**
  * Frame 9:3318: camera, field, send, with the attached photo and any picker note above them. It draws to
  * the bottom edge, so it pads itself above the home indicator. Send keeps the frame's light look while disabled.
  */
-export const ChatInputRow = ({ draft, onChangeDraft, photo, onRemovePhoto, note, canSend, onSend, onAttach }: ChatInputRowProps) => {
+export const ChatInputRow = ({ draft, onChangeDraft, photo, onRemovePhoto, note, canSend, onSend, onAttach, footer }: ChatInputRowProps) => {
   const insets = useSafeAreaInsets();
 
   return (
@@ -60,6 +63,7 @@ export const ChatInputRow = ({ draft, onChangeDraft, photo, onRemovePhoto, note,
           <SendIcon />
         </Pressable>
       </View>
+      {footer}
     </View>
   );
 };

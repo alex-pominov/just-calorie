@@ -5,7 +5,7 @@ import type { PhotoPick, PhotoSource } from './photo-picker.service';
 
 // Every line the chat itself says, in one place. The model's own sentences are not here.
 const ERROR_COPY: Record<ChatErrorKind, string> = {
-  'missing-auth': 'Continue with ChatGPT to get calorie estimates.',
+  'missing-auth': 'Sign in with ChatGPT to get calorie estimates.',
   network: "I couldn't reach the estimate service. Check your connection and try again.",
   api: 'The estimate service returned an error. Please try again in a moment.',
   'usage-limit': "You've reached your ChatGPT usage limit. You can review it in ChatGPT settings.",
@@ -15,6 +15,15 @@ const ERROR_COPY: Record<ChatErrorKind, string> = {
 };
 
 export const errorCopy = (kind: ChatErrorKind) => ERROR_COPY[kind];
+
+/** The words a usage-limit or plan-unavailable line ends on, which open ChatGPT's usage settings (task 9, D4). */
+export const USAGE_SETTINGS_LINK_COPY = 'ChatGPT settings';
+
+/** Whether that line ends on the usage-settings link: OpenAI's errors-and-recovery page asks for one. */
+export const linksToUsageSettings = (kind: ChatErrorKind) => kind === 'usage-limit' || kind === 'plan-unavailable';
+
+/** Figma 24:4327: what an empty chat shows, centred. */
+export const NEW_CHAT_PROMPT_COPY = 'What have I eaten today?';
 
 interface ChatDay {
   dayKey: string;

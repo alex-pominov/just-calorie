@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import type { PropsWithChildren } from 'react';
+import * as Haptics from 'expo-haptics';
 import { findNodeHandle, Pressable, Text, TextInput, View } from 'react-native';
 
 import type { Database } from '@/modules/database';
@@ -13,6 +14,12 @@ import type { NodeSqliteDatabase, TemporaryDatabaseFile } from '@tests/node-sqli
 import { createTemporaryDatabaseFile, openNodeSqliteDatabase } from '@tests/node-sqlite-database';
 
 import { EditCapSheet } from './EditCapSheet';
+
+jest.mock('expo-haptics', () => ({
+  selectionAsync: jest.fn(() => Promise.resolve()),
+  impactAsync: jest.fn(() => Promise.resolve()),
+  ImpactFeedbackStyle: { Light: 'light', Medium: 'medium', Heavy: 'heavy', Rigid: 'rigid', Soft: 'soft' },
+}));
 
 // react-native exports these lazily, so touching them here loads their modules while the file is set up, which no
 // timeout covers; findNodeHandle loads react-native's renderer, the largest of them. Under host load that cold load,
@@ -77,6 +84,18 @@ describe('EditCapSheet', () => {
 
     await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
     expect(await today()).toMatchObject({ capKcal: 700, currentCapKcal: 700 });
+  });
+
+  it('plays no haptic for a cap edit', async () => {
+    await render(<EditCapSheet dayKey={todayKey()} onDone={onDone} />, { wrapper });
+    await waitFor(() => expect(cap().props.value).toBe('1200'));
+
+    await fireEvent.changeText(cap(), '700');
+    await fireEvent.press(confirm());
+    await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect([Haptics.impactAsync, Haptics.selectionAsync].map((haptic) => jest.mocked(haptic).mock.calls.length)).toEqual([0, 0]);
   });
 
   it.each(['', '0'])('keeps the check disabled while the cap is %p, and changes nothing', async (typed) => {

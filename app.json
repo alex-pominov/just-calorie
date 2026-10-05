@@ -47,9 +47,7 @@
       "router": {},
       "eas": {
         "projectId": "95f4c9a5-e3c4-473f-99ed-f3c4e5879333"
-      },
-      "calorieEstimate": {},
-      "chatgptAuth": {}
+      }
     },
     "owner": "seto-org"
   }

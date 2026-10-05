@@ -4,6 +4,7 @@ import type { PanGesture } from 'react-native-gesture-handler';
 import { State } from 'react-native-gesture-handler';
 import { fireGestureHandler, getByGestureTestId } from 'react-native-gesture-handler/jest-utils';
 import type { PropsWithChildren } from 'react';
+import * as Haptics from 'expo-haptics';
 
 import type { Database, SqlReader } from '@/modules/database';
 import { createDatabase } from '@/modules/database/database';
@@ -19,6 +20,12 @@ import { createTemporaryDatabaseFile, openNodeSqliteDatabase } from '@tests/node
 import { TodayScreen } from './TodayScreen';
 
 jest.mock('react-native-safe-area-context', () => jest.requireActual('react-native-safe-area-context/jest/mock').default);
+
+jest.mock('expo-haptics', () => ({
+  selectionAsync: jest.fn(() => Promise.resolve()),
+  impactAsync: jest.fn(() => Promise.resolve()),
+  ImpactFeedbackStyle: { Light: 'light', Medium: 'medium', Heavy: 'heavy', Rigid: 'rigid', Soft: 'soft' },
+}));
 
 // react-native exports these lazily, so touching them here loads their modules while the file is set up, which no
 // timeout covers. Under host load that cold load, inside the first test, outlasted its 5 s budget (backlog #4).
@@ -56,6 +63,8 @@ describe('TodayScreen', () => {
     });
   const swipeRight = () => swipe(120);
   const swipeLeft = () => swipe(-120);
+  // A haptic plays a task later than the action that asked for it.
+  const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 0)));
 
   const openDatabase = async () => {
     file = createTemporaryDatabaseFile();
@@ -222,6 +231,55 @@ describe('TodayScreen', () => {
     await waitFor(() => expect(eatenFigure()).toHaveTextContent('800'));
     expect(String(eatenFigure().props.className)).toContain('absolute');
     expect(String(eatenFigure().parent?.props.className)).toContain('h-25 justify-center');
+  });
+
+  describe('haptics', () => {
+    it('ticks once for each swipe that changes the day, and not for a swipe past today', async () => {
+      await seed('over');
+      await renderScreen();
+      await waitFor(() => expect(eatenFigure()).toHaveTextContent('1600'));
+
+      await swipeRight();
+      await waitFor(() => expect(eatenFigure()).toHaveTextContent('1000'));
+      await swipeLeft();
+      await waitFor(() => expect(eatenFigure()).toHaveTextContent('1600'));
+      await swipeLeft();
+      await settle();
+
+      expect(Haptics.selectionAsync).toHaveBeenCalledTimes(2);
+      expect(Haptics.impactAsync).not.toHaveBeenCalled();
+    });
+
+    it('does not tick for a cancelled drag, a short drag or a week-strip tap', async () => {
+      await seed('over');
+      await renderScreen();
+      await waitFor(() => expect(stripCells()).toHaveLength(15));
+
+      await act(() => {
+        fireGestureHandler<PanGesture>(getByGestureTestId('today-day-swipe'), [
+          { state: State.BEGAN, translationX: 0, velocityX: 0 },
+          { state: State.ACTIVE, translationX: 120, velocityX: 0 },
+          { state: State.CANCELLED, translationX: 120, velocityX: 0 },
+        ]);
+      });
+      await swipe(30);
+      await fireEvent.press(stripCell(1)!);
+      await waitFor(() => expect(eatenFigure()).toHaveTextContent('1000'));
+      await settle();
+
+      expect(Haptics.selectionAsync).not.toHaveBeenCalled();
+    });
+
+    it.each([25, 50, 100])('taps once with a light impact after a quick add of %p kcal is stored', async (kcal) => {
+      await renderScreen();
+      await waitFor(() => expect(eatenFigure()).toHaveTextContent('0'));
+
+      await fireEvent.press(screen.getByRole('button', { name: `Add ${kcal} kcal` }));
+      await waitFor(() => expect(eatenFigure()).toHaveTextContent(String(kcal)));
+      await settle();
+
+      expect(jest.mocked(Haptics.impactAsync).mock.calls).toEqual([[Haptics.ImpactFeedbackStyle.Light]]);
+    });
   });
 
   describe('switching days', () => {
@@ -402,7 +460,9 @@ describe('TodayScreen', () => {
       await fireEvent.press(screen.getByRole('button', { name: 'Add 25 kcal' }));
 
       await waitFor(() => expect(alert).toHaveBeenCalledWith("Couldn't save", 'Try again.'));
+      await settle();
       expect(consoleError).toHaveBeenCalled();
+      expect(Haptics.impactAsync).not.toHaveBeenCalled();
       consoleError.mockRestore();
     });
 

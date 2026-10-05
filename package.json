@@ -15,6 +15,7 @@
     "expo-device": "~57.0.2",
     "expo-font": "~57.0.4",
     "expo-glass-effect": "~57.0.4",
+    "expo-haptics": "~57.0.3",
     "expo-image-manipulator": "~57.0.20",
     "expo-image-picker": "~57.0.20",
     "expo-linking": "~57.0.11",
@@ -53,7 +54,7 @@
     "typescript": "~6.0.3"
   },
   "scripts": {
-    "start": "NODE_OPTIONS=--dns-result-order=ipv4first JUST_CALORIE_DEV_SERVER=1 expo start --localhost",
+    "start": "NODE_OPTIONS=--dns-result-order=ipv4first expo start --localhost",
     "ios": "expo run:ios --no-bundler",
     "lint": "expo lint",
     "lint:cycles": "node scripts/check-cycles.mjs",

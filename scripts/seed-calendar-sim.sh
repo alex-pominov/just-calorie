@@ -5,20 +5,31 @@
 #   scripts/seed-calendar-sim.sh seed                       every day from the 1st of last month to yesterday
 #   scripts/seed-calendar-sim.sh set-day YYYY-MM-DD <kcal>  one past day's entries become one add of <kcal> (0 clears them)
 #
-# SIM_UDID picks the simulator (default: this worktree's 'JC calendar'). The app must have launched once,
-# so its migrations created the database. The app is terminated first. Plain INSERT/UPDATE/DELETE into the
+# SIM_UDID picks the simulator; without it, the one booted simulator, refusing when none or several are booted. The
+# app must have launched once, so its migrations created the database. The app is terminated first. Plain INSERT/UPDATE/DELETE into the
 # existing tables only: no schema change, and PRAGMA user_version is read, never written.
 set -euo pipefail
 
-SIM_UDID=${SIM_UDID:-D3B397AF-5F2E-432B-B9DE-7590FCC3DFE8}
-MAIN_SCREEN_SIM=7A40345A-D218-4CFF-A77A-1AA9867F63F7
 SCHEMA_VERSION=1
 CAP_KCAL=2000
 BUNDLE_ID=$(node -p "require('./app.json').expo.ios.bundleIdentifier")
 
 fail() { echo "[seed] FAIL: $*" >&2; exit 1; }
 
-[[ "$SIM_UDID" != "$MAIN_SCREEN_SIM" ]] || fail "$SIM_UDID is the main-screen workstream's simulator"
+# With two booted, 'booted' would mean either one, so the script never picks between them.
+if [[ -z "${SIM_UDID:-}" ]]; then
+  BOOTED_UDIDS=$(xcrun simctl list devices booted -j | node -e '
+    let json = "";
+    process.stdin.on("data", (chunk) => (json += chunk)).on("end", () => {
+      for (const devices of Object.values(JSON.parse(json).devices)) {
+        for (const device of devices) if (device.state === "Booted") console.log(device.udid);
+      }
+    });')
+  BOOTED_COUNT=$(printf '%s\n' "$BOOTED_UDIDS" | grep -c . || true)
+  [[ "$BOOTED_COUNT" -eq 1 ]] ||
+    fail "$BOOTED_COUNT simulators are booted; boot one, or name it with SIM_UDID=<udid> (xcrun simctl list devices)"
+  SIM_UDID=$BOOTED_UDIDS
+fi
 
 DATA_DIR=$(xcrun simctl get_app_container "$SIM_UDID" "$BUNDLE_ID" data 2>/dev/null) ||
   fail "$BUNDLE_ID is not installed on $SIM_UDID; build it there first"

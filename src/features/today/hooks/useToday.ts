@@ -9,6 +9,7 @@ import {
   useEnsureDailyCap,
   useSetCarryOverDecision,
 } from '@/features/tracking';
+import { playLightImpactHaptic } from '@/modules/haptics';
 
 import { bowlLabel } from '../services/bowl-label.service';
 import { bowlState } from '../services/bowl-counts.service';
@@ -66,7 +67,7 @@ export function useToday(): Today {
     weekDays: days === null ? null : weekStripDays({ dayKey, todayKey: shown.todayKey }, days),
     view,
     addKcal: (kcal) => {
-      addEntry({ dayKey, kind: 'add', kcal }).catch(reportWriteFailure);
+      addEntry({ dayKey, kind: 'add', kcal }).then(playLightImpactHaptic, reportWriteFailure);
     },
     toggleCarryOver: () => {
       if (view?.carryOver) {

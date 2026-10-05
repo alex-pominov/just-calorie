@@ -1,6 +1,6 @@
-// OpenAI's OAuth contract for ChatGPT plan usage, as documented on 2026-10-04:
+// OpenAI's OAuth contract for ChatGPT plan usage in an open-source app, as documented on 2026-10-05:
 // https://auth.openai.com/.well-known/openid-configuration and
-// https://developers.openai.com/siwc/token-sharing-open-source/sign-in. The README's probe section lists each source.
+// https://developers.openai.com/siwc/token-sharing-open-source/sign-in. The README lists each source.
 
 export const OPENAI_ISSUER = 'https://auth.openai.com';
 
@@ -19,5 +19,8 @@ export const CHATGPT_SCOPES = ['openid', 'profile', 'email', 'offline_access', '
 /** The resource every authorize, code-exchange and refresh request names. */
 export const OPENAI_API_RESOURCE = 'https://api.openai.com/v1';
 
-/** Where the sign-in browser returns to the app: app.json's `scheme`, path `auth/callback`. Also the default redirect. */
-export const APP_CALLBACK_URL = 'justcalorie://auth/callback';
+/** The first-time registration entrypoint: never the client ID to save, exchange, refresh or revoke with. */
+export const DYNAMIC_REGISTRATION_CLIENT_ID = 'dynamic_agent_client';
+
+/** `agent_name_hint` on a first registration: the app's actual name, the same on every install. */
+export const AGENT_NAME = 'Just Calorie';

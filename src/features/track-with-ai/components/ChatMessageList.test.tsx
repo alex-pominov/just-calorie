@@ -20,13 +20,13 @@ describe('ChatMessageList', () => {
   // The tree's first render, with its modules already loaded, so the timed test below starts warm.
   beforeAll(async () => {
     expect(PRELOADED).not.toContain(undefined);
-    const warm = await render(<ChatMessageList messages={messages} dayName="today" headerHeight={134} onAdd={jest.fn()} />);
+    const warm = await render(<ChatMessageList messages={messages} dayName="today" headerHeight={134} onAdd={jest.fn()} onOpenUsageSettings={jest.fn()} />);
     await warm.unmount();
   });
 
   it('keeps the newest message in view from the measured content and viewport, whichever changes', async () => {
     const scrollToOffset = jest.spyOn(FlatList.prototype, 'scrollToOffset').mockImplementation(() => {});
-    await render(<ChatMessageList messages={messages} dayName="today" headerHeight={134} onAdd={jest.fn()} />);
+    await render(<ChatMessageList messages={messages} dayName="today" headerHeight={134} onAdd={jest.fn()} onOpenUsageSettings={jest.fn()} />);
     const list = screen.getByTestId('chat-messages');
 
     await fireEvent(list, 'layout', layout(784));

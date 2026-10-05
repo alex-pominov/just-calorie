@@ -77,11 +77,14 @@ describe('exchangeCode', () => {
     const fetch = jest.fn((_url: string, _init: RequestInit) => respond(200, tokenBody()));
 
     await expect(exchangeCode({ fetch }, CODE_REQUEST)).resolves.toEqual({
-      accessToken: ACCESS,
-      refreshToken: REFRESH,
-      idToken: ID_TOKEN,
-      expiresInSeconds: 3600,
-      scopes: ['openid', 'profile', 'email', 'offline_access', 'resource.invoke', 'chatgpt.tokens.use.direct'],
+      ok: true,
+      tokens: {
+        accessToken: ACCESS,
+        refreshToken: REFRESH,
+        idToken: ID_TOKEN,
+        expiresInSeconds: 3600,
+        scopes: ['openid', 'profile', 'email', 'offline_access', 'resource.invoke', 'chatgpt.tokens.use.direct'],
+      },
     });
   });
 
@@ -122,10 +125,28 @@ describe('exchangeCode', () => {
     jest.useRealTimers();
   });
 
-  it.each([400, 401, 500])("maps HTTP %i to 'failed'", async (status) => {
+  it.each([400, 401, 500])('reads HTTP %i as a refused exchange', async (status) => {
     const fetch = jest.fn((_url: string, _init: RequestInit) => respond(status, { error: 'invalid_grant' }));
 
-    await expect(exchangeCode({ fetch }, CODE_REQUEST)).rejects.toMatchObject({ kind: 'failed' });
+    await expect(exchangeCode({ fetch }, CODE_REQUEST)).resolves.toEqual({ ok: false, reason: 'refused' });
+  });
+
+  it('reads invalid_client as a client OpenAI no longer accepts, keeping nothing else of the body', async () => {
+    const fetch = jest.fn((_url: string, _init: RequestInit) =>
+      respond(401, { error: 'invalid_client', error_description: `client ${CLIENT_ID} with ${REFRESH}` }),
+    );
+
+    await expect(exchangeCode({ fetch }, CODE_REQUEST)).resolves.toEqual({ ok: false, reason: 'invalid-client' });
+  });
+
+  it.each([
+    ['an error code that is not a plain OAuth code', { error: 'invalid_client <b>' }],
+    ['no error code', {}],
+    ['a body that is not an object', 'invalid_client'],
+  ])('reads a refusal with %s as refused', async (_case, body) => {
+    const fetch = jest.fn((_url: string, _init: RequestInit) => respond(400, body));
+
+    await expect(exchangeCode({ fetch }, CODE_REQUEST)).resolves.toEqual({ ok: false, reason: 'refused' });
   });
 
   it.each([
@@ -152,7 +173,7 @@ describe('exchangeCode', () => {
   it('reads a response with no refresh token, ID token or scope as null', async () => {
     const fetch = jest.fn((_url: string, _init: RequestInit) => respond(200, tokenBody({ refresh_token: undefined, id_token: undefined, scope: undefined })));
 
-    await expect(exchangeCode({ fetch }, CODE_REQUEST)).resolves.toMatchObject({ refreshToken: null, idToken: null, scopes: null });
+    await expect(exchangeCode({ fetch }, CODE_REQUEST)).resolves.toMatchObject({ ok: true, tokens: { refreshToken: null, idToken: null, scopes: null } });
   });
 });
 
@@ -182,6 +203,12 @@ describe('refreshTokens', () => {
     });
   });
 
+  it('reads invalid_client as a client OpenAI no longer accepts', async () => {
+    const fetch = jest.fn((_url: string, _init: RequestInit) => respond(401, { error: 'invalid_client' }));
+
+    await expect(refreshTokens({ fetch }, REFRESH_REQUEST)).resolves.toEqual({ ok: false, reason: 'invalid-client' });
+  });
+
   it.each([400, 401, 403])('reads HTTP %i as a session that has ended, so the user signs in again', async (status) => {
     const fetch = jest.fn((_url: string, _init: RequestInit) => respond(status, { error: 'invalid_grant' }));
 
@@ -207,25 +234,36 @@ describe('revokeRefreshToken', () => {
   it('posts the refresh token with its type hint and the issued client to the revocation endpoint', async () => {
     const fetch = jest.fn((_url: string, _init: RequestInit) => respond(200));
 
-    await expect(revokeRefreshToken({ fetch }, REVOKE_REQUEST)).resolves.toBe(true);
+    await expect(revokeRefreshToken({ fetch }, REVOKE_REQUEST)).resolves.toBe('revoked');
 
     expect(fetch.mock.calls[0]?.[0]).toBe(OPENAI_AUTH_ENDPOINTS.revocation);
     expect(sentForm(fetch)).toEqual({ token: REFRESH, token_type_hint: 'refresh_token', client_id: CLIENT_ID });
   });
 
   it.each([
-    ['an error status', () => respond(503)],
+    ['a 503', () => respond(503)],
+    ['a 500', () => respond(500)],
     ['a rejected fetch', () => Promise.reject(new TypeError('Network request failed'))],
-  ])('reports an unconfirmed revocation on %s instead of throwing', async (_case, reply) => {
-    await expect(revokeRefreshToken({ fetch: jest.fn(reply) }, REVOKE_REQUEST)).resolves.toBe(false);
+  ])('reports OpenAI unreachable on %s, which a retry may still confirm', async (_case, reply) => {
+    await expect(revokeRefreshToken({ fetch: jest.fn(reply) }, REVOKE_REQUEST)).resolves.toBe('unreachable');
+  });
+
+  it.each([400, 401, 429])('reports a %p as refused, which no retry changes', async (status) => {
+    await expect(revokeRefreshToken({ fetch: jest.fn(() => respond(status)) }, REVOKE_REQUEST)).resolves.toBe('refused');
   });
 });
 
 describe('never lets a token out', () => {
   const echoing = { error: 'invalid_grant', error_description: `bad token ${REFRESH} ${ACCESS}` };
 
+  it('in the result of a refused code exchange', async () => {
+    const result = await exchangeCode({ fetch: jest.fn((_url: string, _init: RequestInit) => respond(400, echoing)) }, CODE_REQUEST);
+
+    expect(JSON.stringify(result)).not.toContain(REFRESH);
+    expect(JSON.stringify(result)).not.toContain(ACCESS);
+  });
+
   it.each([
-    ['a refused code exchange', () => exchangeCode({ fetch: jest.fn((_url: string, _init: RequestInit) => respond(400, echoing)) }, CODE_REQUEST)],
     ['a malformed token response', () => exchangeCode({ fetch: jest.fn((_url: string, _init: RequestInit) => respond(200, { ...echoing, expires_in: 'soon' })) }, CODE_REQUEST)],
     ['a refresh that failed on the network', () => refreshTokens({ fetch: jest.fn((_url: string, _init: RequestInit) => respond(503, echoing)) }, { clientId: CLIENT_ID, refreshToken: REFRESH })],
   ])('in the error from %s', async (_case, run) => {

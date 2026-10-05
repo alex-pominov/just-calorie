@@ -31,7 +31,8 @@ signs in registers their own (see below).
 | `bun lint:cycles` | Fails on any import cycle under `src/` and `app/` |
 | `bun run test` | Jest (jest-expo); writes `coverage/junit.xml`. Bare `bun test` is Bun's own test runner, not Jest |
 
-Always start Metro with `bun start`, never a bare `expo start`, and never let `expo run:ios` start its own bundler.
+Always start Metro with `bun start`, never a bare `expo start`, and never let `expo run:ios` start its own bundler:
+Metro serves the app's whole source, and only a simulator on this Mac needs it, so it listens on 127.0.0.1 alone.
 `bun start` resolves IPv4 first: Expo writes 127.0.0.1 into the manifest's URLs, and Node would otherwise bind
 `localhost` to `::1` only, so the app could fetch its manifest but never its bundle.
 
@@ -62,13 +63,6 @@ them run `bunx expo prebuild --platform ios`, then `bun ios`. A build with `NODE
 The development client waits a fixed 10 s for Metro's manifest. Past that, for instance on a heavily loaded machine,
 a cold launch or deep link lands in the launcher and the link is lost: open it again rather than debugging it, and
 before a cold check warm Metro with one request to `http://127.0.0.1:<port>/status`.
-
-### An optional development key
-
-A development build can also estimate with an OpenAI API key instead of a ChatGPT sign-in: put `OPENAI_API_KEY` in a
-gitignored `.env` at the root. It is optional, it bills the key's owner, and it is for development only: only the
-Metro that `bun start` runs serves it, and a production build never carries it
-(`src/modules/calorie-estimate/README.md`).
 
 ### Seeding the Calendar on a simulator
 

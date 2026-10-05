@@ -1,13 +1,9 @@
-import type { CalorieEstimateRequest, EstimateCredential } from './calorie-estimate.types';
+import type { CalorieEstimateRequest } from './calorie-estimate.types';
 
 /** The model the app asks for. Cheap, current and vision-capable (OpenAI model catalog, 2026-10-04). */
 export const ESTIMATE_MODEL = 'gpt-6-luna';
 
 export const RESPONSES_PATH = '/responses';
-
-// Reasoning tokens count against this cap, so it is generous; a whole reply is a sentence and a number. Only the
-// development key's route takes it: the ChatGPT plan route refuses max_output_tokens.
-const MAX_OUTPUT_TOKENS = 2000;
 
 // REPLY LANGUAGE: the owner ruled (a) on 2026-10-04, request [0], to reply in the user's language. English for a
 // photo sent alone is this module's own default, where the ruling is silent.
@@ -50,20 +46,16 @@ function userContent(request: CalorieEstimateRequest) {
   return parts;
 }
 
-// The ChatGPT plan route's contract, kept on both routes so the development key exercises the same request:
-// `instructions` instead of a system message (it rejects one), `stream: true` and `store: false`.
+// The ChatGPT plan route's contract: `instructions` instead of a system message (it rejects one), `stream: true`,
+// `store: false`, and no `max_output_tokens`, which it refuses.
 /** The Responses API body for one estimate. Nothing is stored on OpenAI's side (`store: false`). */
-export function buildEstimateRequestBody(
-  request: CalorieEstimateRequest,
-  options: { readonly model: string; readonly route: EstimateCredential['kind'] },
-) {
+export function buildEstimateRequestBody(request: CalorieEstimateRequest, options: { readonly model: string }) {
   return {
     model: options.model,
     instructions: SYSTEM_PROMPT,
     input: [{ role: 'user', content: userContent(request) }],
     text: { format: { type: 'json_schema', name: 'calorie_estimate', strict: true, schema: ESTIMATE_SCHEMA } },
     reasoning: { effort: 'low' },
-    ...(options.route === 'api-key' ? { max_output_tokens: MAX_OUTPUT_TOKENS } : {}),
     store: false,
     stream: true,
   };

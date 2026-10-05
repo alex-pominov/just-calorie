@@ -1,3 +1,4 @@
+import type * as ChatGPTAuthMock from '@tests/chatgpt-auth.mock';
 import {
   ActivityIndicator,
   FlatList,
@@ -19,6 +20,9 @@ import { TrackWithAiScreen } from './TrackWithAiScreen';
 // QA reproduction (track-with-ai, round 1a). The estimator accepts any safe integer >= 1 as kcal, while
 // tracking's addEntry refuses anything above MAX_KCAL (10,000, src/features/tracking/services/kcal.service.ts).
 // An estimate between the two is shown with an enabled Add that can never succeed.
+// The chat shows only when signed in (Figma 24:4327); these tests drive the chat.
+jest.mock('@/modules/chatgpt-auth', () => jest.requireActual<typeof ChatGPTAuthMock>('@tests/chatgpt-auth.mock').chatGPTAuthMock);
+
 jest.mock('@/modules/calorie-estimate', () => ({
   ...jest.requireActual('@/modules/calorie-estimate'),
   estimateCalories: jest.fn(),
