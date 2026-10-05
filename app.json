@@ -1,0 +1,56 @@
+{
+  "expo": {
+    "name": "Just Calorie",
+    "slug": "justcalories",
+    "version": "1.0.0",
+    "platforms": [
+      "ios"
+    ],
+    "orientation": "portrait",
+    "scheme": "justcalorie",
+    "userInterfaceStyle": "dark",
+    "icon": "./src/assets/images/app-icon.png",
+    "ios": {
+      "bundleIdentifier": "com.alexpominov.justcalorie",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "plugins": [
+      "expo-router",
+      "./plugins/with-no-http-cache",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Just Calorie uses the photos you choose to estimate their calories.",
+          "cameraPermission": "Just Calorie uses the camera to photograph your food and estimate its calories.",
+          "microphonePermission": false
+        }
+      ],
+      [
+        "expo-font",
+        {
+          "fonts": [
+            "./src/assets/fonts/Manrope-Medium.ttf",
+            "./src/assets/fonts/Manrope-SemiBold.ttf",
+            "./src/assets/fonts/Manrope-Bold.ttf",
+            "./src/assets/fonts/Manrope-Regular.ttf"
+          ]
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "95f4c9a5-e3c4-473f-99ed-f3c4e5879333"
+      },
+      "calorieEstimate": {},
+      "chatgptAuth": {}
+    },
+    "owner": "seto-org"
+  }
+}

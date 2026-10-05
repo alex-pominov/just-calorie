@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "figma": {
+      "type": "http",
+      "url": "http://localhost:2121/mcp"
+    },
+    "mobile-mcp": {
+      "command": "/opt/homebrew/bin/mcp-server-mobile",
+      "args": []
+    }
+  }
+}
