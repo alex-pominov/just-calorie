@@ -36,6 +36,8 @@ export interface ChatGPTAuthDependencies {
   readonly now: () => number;
   /** Resolves after `ms`; tests pass one that does not wait. */
   readonly wait: (ms: number) => Promise<void>;
+  /** Removes OpenAI's and ChatGPT's cookies from the app's cookie store. */
+  readonly clearCookies: () => Promise<void>;
 }
 
 export interface ChatGPTAuth {
@@ -149,6 +151,10 @@ export function createChatGPTAuth(dependencies: ChatGPTAuthDependencies): ChatGP
         lastSubject = accounts.lastSubject;
         if (accounts.session !== null) replaceSession(accounts.session);
       }
+
+      // Nobody is signed in, so OpenAI's cookies have no use: this finishes a sign-out quit during its revocation,
+      // whose Keychain write already said signed out (qa f-12d58b). Not awaited, so a stuck store cannot hold 'loading'.
+      if (readable && session === null) void dependencies.clearCookies().catch(() => null);
 
       loaded = true;
       publish();
@@ -455,8 +461,18 @@ export function createChatGPTAuth(dependencies: ChatGPTAuthDependencies): ChatGP
     return { revoked };
   }
 
+  // Backlog 17: a sign-out also clears OpenAI's cookies, after the revocation, whose response sets some of them. None
+  // is a credential, and the tokens are already gone, so a store that will not clear does not fail the sign-out.
+  async function signOutAndClearCookies(pendingSignIn: Promise<SignInOutcome> | null): Promise<SignOutOutcome> {
+    const outcome = await runSignOut(pendingSignIn);
+
+    await dependencies.clearCookies().catch(() => null);
+
+    return outcome;
+  }
+
   function signOut(): Promise<SignOutOutcome> {
-    signingOut ??= runSignOut(signingIn).finally(() => {
+    signingOut ??= signOutAndClearCookies(signingIn).finally(() => {
       signingOut = null;
       publish();
     });

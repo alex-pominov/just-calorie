@@ -71,7 +71,8 @@ function readOutcome(outcome: LoopbackOutcome, codeVerifier: string | undefined,
  * auth session cannot catch an http redirect, so it is dismissed here once the callback has arrived.
  */
 async function waitForCallback(url: string, listener: LoopbackCallback): Promise<LoopbackOutcome | 'unavailable'> {
-  const sheet = WebBrowser.openAuthSessionAsync(url, null).then(
+  // A private session shares no cookies with Safari and keeps none, so no chatgpt.com login outlives a sign-out.
+  const sheet = WebBrowser.openAuthSessionAsync(url, null, { preferEphemeralSession: true }).then(
     () => 'closed' as const,
     () => 'unavailable' as const,
   );

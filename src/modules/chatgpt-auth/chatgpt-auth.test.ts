@@ -67,6 +67,7 @@ interface Overrides {
   revokeStatus?: number;
   /** Called once per revocation attempt, in order. */
   revoke?: (init: RequestInit) => TokenReply;
+  clearCookies?: () => Promise<void>;
 }
 
 /** OpenAI's page as the app meets it: a first registration names the client it issued; a reauthorization omits it. */
@@ -112,17 +113,19 @@ function setup(overrides: Overrides = {}) {
   let tokenCounter = 0;
   let hostIds = 0;
   const wait = jest.fn((_ms: number) => Promise.resolve());
+  const clearCookies = jest.fn(() => overrides.clearCookies?.() ?? Promise.resolve());
   const auth = createChatGPTAuth({
     store,
     fetch,
     authorize,
     wait,
+    clearCookies,
     randomToken: () => `random-${(tokenCounter += 1)}`,
     newHostId: () => `urn:uuid:host-${(hostIds += 1)}`,
     now: () => clock.now,
   });
 
-  return { auth, store, fetch, authorize, clock, attempts, signingInAs, wait };
+  return { auth, store, fetch, authorize, clock, attempts, signingInAs, wait, clearCookies };
 }
 
 const storedSession = (overrides: Partial<StoredChatGPTSession> = {}): StoredChatGPTSession => ({
@@ -229,6 +232,49 @@ describe('loading the session', () => {
 
     expect(auth.getStatus()).toBe('signed-out');
     expect(store.items.has(SESSION_KEY)).toBe(true);
+  });
+
+  it('clears OpenAI’s cookies on a launch that finds nobody signed in, finishing a sign-out the app was quit during (qa f-12d58b)', async () => {
+    const store = signedInStore();
+    const quit = setup({ store, revoke: () => new Promise<never>(() => undefined) });
+    await quit.auth.load();
+    void quit.auth.signOut();
+    await flush();
+
+    const relaunch = setup({ store });
+    await relaunch.auth.load();
+    await flush();
+
+    expect([quit.clearCookies.mock.calls.length, relaunch.auth.getStatus(), relaunch.clearCookies.mock.calls.length]).toEqual([0, 'signed-out', 1]);
+  });
+
+  it('clears no cookie on a launch that finds the user signed in', async () => {
+    const { auth, clearCookies } = setup({ store: signedInStore() });
+
+    await auth.load();
+    await flush();
+
+    expect(clearCookies).not.toHaveBeenCalled();
+  });
+
+  it('clears no cookie on a launch that cannot read the keychain, since it cannot tell whether anyone is signed in', async () => {
+    const store = signedInStore();
+    jest.mocked(store.getItemAsync).mockRejectedValueOnce(new Error('locked'));
+    const { auth, clearCookies } = setup({ store });
+
+    await auth.load();
+    await flush();
+
+    expect(clearCookies).not.toHaveBeenCalled();
+  });
+
+  it('still reads signed out when the cookies will not clear at launch', async () => {
+    const { auth } = setup({ store: signedOutStore(), clearCookies: () => Promise.reject(new Error('cookie store')) });
+
+    await auth.load();
+    await flush();
+
+    expect(auth.getStatus()).toBe('signed-out');
   });
 
   it('reads the keychain again on the next call after a read that failed, as when the phone was locked', async () => {
@@ -815,6 +861,56 @@ describe('signOut', () => {
     expect(itemOf(store)).toEqual({ version: 2, registrations: [REGISTRATION_A], lastSubject: 'user-a', session: null });
     expect(store.items.get(HOST_ID_KEY)).toBe(HOST_ID);
     expect([...store.items.values()].join('\n')).not.toMatch(/stored-access|stored-refresh/);
+  });
+
+  it('clears OpenAI’s and ChatGPT’s cookies once the revocation has ended, so the cookies it set go too (backlog 17)', async () => {
+    const revoke = held<Awaited<TokenReply>>();
+    const { auth, clearCookies } = setup({ store: signedInStore(), revoke: () => revoke.promise });
+    await auth.load();
+
+    const signingOut = auth.signOut();
+    await flush();
+    const clearedWhileRevoking = clearCookies.mock.calls.length;
+    revoke.release(REVOKED);
+    await signingOut;
+
+    expect([clearedWhileRevoking, clearCookies.mock.calls.length]).toEqual([0, 1]);
+  });
+
+  it('clears the cookies when OpenAI does not confirm the revocation too', async () => {
+    const { auth, clearCookies } = setup({ store: signedInStore(), revokeStatus: 503 });
+
+    await expect(auth.signOut()).resolves.toEqual({ revoked: false });
+
+    expect(clearCookies).toHaveBeenCalledTimes(1);
+  });
+
+  it('stays signing out until the cookies are cleared, and starts a sign-in asked for meanwhile only after them', async () => {
+    const clearing = held<undefined>();
+    const { auth, authorize, clearCookies } = setup({ store: signedInStore(), clearCookies: () => clearing.promise });
+    await auth.load();
+
+    const signingOut = auth.signOut();
+    await flush();
+    const statusWhileClearing = auth.getStatus();
+    const signingIn = auth.signIn();
+    await flush();
+    const authorizedWhileClearing = authorize.mock.calls.length;
+    clearing.release(undefined);
+    await Promise.all([signingOut, signingIn]);
+
+    expect([statusWhileClearing, authorizedWhileClearing, clearCookies.mock.calls.length]).toEqual(['signing-out', 0, 1]);
+    expect(auth.getStatus()).toBe('signed-in');
+  });
+
+  it('still signs out, with the usual outcome, when the cookies will not clear', async () => {
+    const store = signedInStore();
+    const { auth } = setup({ store, clearCookies: () => Promise.reject(new Error('cookie store')) });
+
+    await expect(auth.signOut()).resolves.toEqual({ revoked: true });
+
+    expect(auth.getStatus()).toBe('signed-out');
+    expect(itemOf(store)).toMatchObject({ session: null });
   });
 
   it('lets the same account sign in again with its client, creating no new one', async () => {

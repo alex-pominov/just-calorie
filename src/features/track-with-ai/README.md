@@ -54,16 +54,23 @@ Each default below is set in one place.
     account**, registers another account with its own client (D2; OpenAI's sign-in docs, §1: "let them choose a saved
     ChatGPT account or add another account"). A fresh install shows exactly the frame, with no link.
   - A cancelled sign-in says nothing. Any other ending leaves one line under the pill naming why (D3).
-  - **Signed in (Figma `24:4327`)**: the chat and its input row, with **Sign Out from GPT** under the row
-    (`SignedInChat`, `ChatGPTSignOutLink`). While the chat is empty, **What have I eaten today?** sits centred above
-    the row (D6); it goes with the first message. Sign Out from GPT stays under the row, and reads **Signing out…**,
-    disabled, until the sign-out ends (D5). A sign-out that failed, or that OpenAI did not confirm, leaves one line
-    under the link (D3); the unconfirmed one points at ChatGPT settings to disconnect the app.
+  - **Signed in (Figma `24:4327`)**: the chat and its input row, with **Sign Out from GPT** centred 16pt above the
+    row, on the input section's top edge and not part of it (`SignedInChat`, `ChatGPTSignOutLink`; owner's intake-9,
+    backlog 19). The empty chat draws nothing else: the frame dropped its **What have I eaten today?** prompt on
+    2026-10-05. The input section pads the row 16pt above and 24pt below, as the frame draws it: the row ends inside
+    the 34pt home-indicator inset, where it used to be held above it (backlog 19 asks for the frame within 1pt). The
+    keyboard covers the link rather than lifting it with the row, so it shows only while the keyboard is down
+    (`useKeyboardShown`, on the same keyboardWillShow and keyboardWillHide that move the row; a hardware keyboard's
+    shortcut bar hides it too). The account's line under it stays up with the keyboard (qa f-ae4ff0). An attached
+    photo or a picker note sits between the link and the row. Sign Out from GPT reads **Signing out…**, disabled,
+    until the sign-out ends (D5). A sign-out that failed leaves the user signed in, with one line under the link (D3).
+    One that OpenAI did not confirm still signs this phone out, so its line, which points at ChatGPT settings to
+    disconnect the app, shows under the pill on the signed-out view (qa f-49b773).
   - **Leaving signed-in discards the chat** (qa f-d56e21): the moment the session starts signing out, or ends on its
     own, the messages, the typed draft and an attached photo go, and a reply still in flight is aborted, since it was
     fetched with that session's token. The next sign-in, another account included, starts at the empty chat.
-  - **ChatGPT settings** in the usage-limit and plan-unavailable lines is a link to ChatGPT's usage settings (D4). If
-    those settings cannot open, a line under Sign Out from GPT says so. There is no separate Manage usage control.
+  - **ChatGPT settings** in the usage-limit and plan-unavailable lines is a link to ChatGPT's usage settings (D4),
+    which open in the default browser, outside the app (backlog 17). If they cannot open, a line under Sign Out from GPT says so. There is no separate Manage usage control.
   - Neither state shows until the Keychain has been read, so the sign-in prompt never flashes for a signed-in user.
   - Every estimate runs on the signed-in user's ChatGPT plan; there is no other credential.
 - **Add:**
@@ -127,9 +134,8 @@ Frame `9:3192` does not draw these, so they are built from existing tokens:
 
 ## Deviations from the frame, on purpose
 
-- **The input row sits above the home indicator,** 8pt higher than the frame. With the keyboard up it
-  sits 8pt above the keyboard, the spacing scale's step 2.
-- **The row has 16pt padding on both sides.** The frame has 19pt on the left and 16pt on the right.
+- **The signed-out line reads "To activate AI features"**, where frame `24:4273` says "To active AI features": a
+  copy fix the Manager made under the owner's delegation on 2026-10-05, which the owner may revert.
 - **The field is 48pt tall,** like the buttons. The frame draws it at 47pt.
 - **A text bubble above a photo hugs its text.** The frame stretches it to its fixed 257pt column.
 

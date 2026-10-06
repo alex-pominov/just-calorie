@@ -11,7 +11,7 @@ client. **This is the only code that touches a ChatGPT token or the Keychain.** 
   reads the Keychain; `'signing-out'` lasts until OpenAI and the Keychain have let go.
 - `useHasSavedChatGPTAccount()` is true once an account has registered on this phone. A plain sign-in then reuses
   that account's client, and the UI can offer to add another account.
-- `signInWithChatGPT(options?)` opens OpenAI's sign-in in an iOS auth session and resolves `'signed-in'` or
+- `signInWithChatGPT(options?)` opens OpenAI's sign-in in a private iOS auth session and resolves `'signed-in'` or
   `'cancelled'`. It reuses the account signed in last, or registers the first one. `{ newAccount: true }` registers
   another ChatGPT account instead.
 - `signOutOfChatGPT()` stops handing out the token at once and waits for a sign-in or refresh in flight. It then clears
@@ -28,14 +28,15 @@ client. **This is the only code that touches a ChatGPT token or the Keychain.** 
   the delete keeps a usable item, which the next launch uses until it nears expiry. Taps that arrive together share
   one sign-out, as they share one sign-in. A sign-in asked for while a sign-out is under way waits for it, so the
   sign-out never overwrites the new session (qa f-463b39); each waits only for the other already under way when it
-  was asked for.
+  was asked for. Last, still reading as signing out, it clears the openai.com and chatgpt.com cookies (below).
 - `getChatGPTAccessToken()` is the signed-in user's access token, refreshed first when it is within five minutes of
   expiry, or `null` when nobody is signed in on this device. A refresh that cannot reach OpenAI keeps a token that
   has not expired yet. `modules/calorie-estimate` is its one caller.
 - `rejectChatGPTAccessToken(token)` is for a token OpenAI refused (a 401) although it had not expired: the next
   `getChatGPTAccessToken` refreshes before handing one out, and a refresh OpenAI refuses ends the session.
 - `openChatGPTUsageSettings()` opens <https://chatgpt.com/settings/usage>, where a user reviews and limits what apps
-  spend of their plan.
+  spend of their plan, in the default browser. An in-app browser would keep a chatgpt.com login among Just Calorie's
+  own website data, out of a sign-out's reach (backlog 17, the Manager's ruling of 2026-10-05).
 - `ChatGPTAuthError` is the only error these throw. Switch on `kind`:
 
   | `kind` | When |
@@ -68,6 +69,11 @@ OpenAI's pages are cited by section; each was read on 2026-10-05. "Sign-in" is
 3. **The callback.** The auth sheet watches for no URL, since an auth session cannot catch an `http` redirect. The
    listener answers OpenAI's redirect with a page saying the sheet can be closed, and the sheet is then dismissed. A
    user who closes the sheet cancels the sign-in. The listener closes on every path.
+
+   The sheet is a **private session** (`preferEphemeralSession`, iOS's `prefersEphemeralWebBrowserSession`). It shares
+   no cookies with Safari and keeps none, so the user types their ChatGPT credentials on every sign-in, and no
+   chatgpt.com login survives a sign-out to let someone else back in (backlog 17, the Manager's ruling under the
+   owner's delegation, 2026-10-05: "i dont want anyone use my account").
 4. **The issued client** (sign-in, §3). A first registration must name its issued `oaiapp_` client, and anything else
    is refused before a code is redeemed ("treat registration as incomplete"). A saved account's callback may omit
    it, but may never name another.
@@ -85,6 +91,16 @@ OpenAI's pages are cited by section; each was read on 2026-10-05. "Sign-in" is
 clearing the selected account's access, refresh, and ID tokens. Retain its account/client mapping and this host's ID
 for a later sign-in." So "signing out or switching back to a saved ChatGPT account does not create a new client".
 A client ID on its own grants nothing.
+
+**Sign-out also clears OpenAI's cookies** (backlog 17). The app's own requests, the estimate on api.openai.com and
+the token endpoint, leave cookies in the app's shared cookie store (`Library/Cookies/Cookies.binarycookies`): measured
+on a phone after a sign-out, `__oailb` (an edge load-balancer JWT with no account claim), `__cflb`, `__cf_bm` and
+`oai-did`. None is a credential, but each ties the phone to the session that set it. So once the revocation has ended,
+whether or not OpenAI confirmed it, sign-out removes every cookie whose domain is openai.com or chatgpt.com or a
+subdomain of either (`openai-cookies.ts`, over `modules/http-cookies`), and no other site's. A store that will not
+clear does not fail the sign-out, because the tokens are already gone. A launch that reads the Keychain and finds
+nobody signed in clears them too, which finishes a sign-out the app was quit during: its Keychain write already said
+signed out, so nothing would offer Sign Out from GPT again (qa f-12d58b).
 
 **Refresh** uses the session's issued client, never `dynamic_agent_client`, and is serialised, because refresh
 tokens rotate (accounts and sessions, "Refreshing tokens"). A refresh OpenAI refuses for good clears the tokens and
@@ -133,8 +149,13 @@ in last, and one link to add another. There is no account list.
   signed in.
 - Nothing about the client, the account or a token goes anywhere else: not the app config, SQLite, a log or an error.
 - No config plugin is added. `expo-secure-store`'s only adds a Face ID purpose string, which nothing here uses, and
-  `expo-web-browser`'s does nothing on iOS. The listener needs no Info.plist key, because Safari's auth session, not the
-  app, loads the loopback page.
+  `expo-web-browser`'s does nothing on iOS. The listener needs no Info.plist key, because Safari's auth session, not
+  the app, loads the loopback page.
+- **Clearing cookies is a local module**, `modules/http-cookies`, whose README says why no package was taken.
+- **What earlier builds left outside the app is out of reach.** Before backlog 17 the sign-in sheet shared Safari's
+  cookies and ChatGPT settings opened in an in-app browser, so a phone that signed in then may still hold a ChatGPT
+  web login in Safari (Settings > Apps > Safari > Advanced > Website Data) or in that browser's data. This build
+  neither reads nor clears either.
 
 ## External constraints
 
@@ -167,5 +188,6 @@ length of a sign-in, and `lsof -nP -iTCP -sTCP:LISTEN` shows it there.
 
 Every collaborator is injected through `createChatGPTAuth`: an in-memory Keychain, a routed fake fetch, a fake
 authorize, and a clock. `authorize.test.ts` runs the real `AuthRequest` over node's crypto against a fake listener, to
-check the authorize URL OpenAI receives, the sheet's handling and the listener's lifetime. `loopback-callback.test.ts`
+check the authorize URL OpenAI receives, the private sheet's handling and the listener's lifetime.
+`openai-cookies.test.ts` runs the cookie clearing over a fake cookie store holding other sites' cookies too. `loopback-callback.test.ts`
 drives the boundary over a fake native module. `scripts/probe-loopback-listener.sh` exercises the Swift listener itself.

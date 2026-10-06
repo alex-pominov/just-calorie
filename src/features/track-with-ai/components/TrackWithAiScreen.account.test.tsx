@@ -1,8 +1,20 @@
 import type * as ChatGPTAuthMock from '@tests/chatgpt-auth.mock';
-import { findNodeHandle, FlatList, I18nManager, KeyboardAvoidingView, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
-import { act, fireEvent, renderRouter, screen } from 'expo-router/testing-library';
+import {
+  DeviceEventEmitter,
+  findNodeHandle,
+  FlatList,
+  I18nManager,
+  KeyboardAvoidingView,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+import { act, fireEvent, renderRouter, screen, within } from 'expo-router/testing-library';
 
-import type { ChatGPTSessionStatus } from '@/modules/chatgpt-auth';
+import type { ChatGPTSessionStatus, SignOutOutcome } from '@/modules/chatgpt-auth';
 import { ChatGPTAuthError, openChatGPTUsageSettings, signInWithChatGPT, signOutOfChatGPT } from '@/modules/chatgpt-auth';
 import { EstimateError, estimateCalories } from '@/modules/calorie-estimate';
 import { mockChatGPTAccount, setMockChatGPTAccount } from '@tests/chatgpt-auth.mock';
@@ -31,6 +43,12 @@ jest.mock('@/features/tracking', () => ({
 // react-native exports these lazily; touching them here loads their modules, findNodeHandle the renderer, outside
 // any timed test (backlog #8).
 const PRELOADED = [findNodeHandle, FlatList, I18nManager, KeyboardAvoidingView, Pressable, ScrollView, Text, TextInput, View];
+
+// iOS's keyboard notifications as React Native delivers them: a 336pt keyboard over an 852pt screen, and its way down.
+const keyboardFrame = (screenY: number, height: number, width = 393) => ({ screenX: 0, screenY, width, height });
+const KEYBOARD_UP = { duration: 250, easing: 'keyboard', endCoordinates: keyboardFrame(516, 336), startCoordinates: keyboardFrame(852, 336) };
+const layoutEvent = (width: number, height: number) => ({ nativeEvent: { layout: { x: 0, y: 0, width, height } }, persist: () => undefined });
+const KEYBOARD_DOWN = { ...KEYBOARD_UP, endCoordinates: KEYBOARD_UP.startCoordinates, startCoordinates: KEYBOARD_UP.endCoordinates };
 
 const mockSignIn = jest.mocked(signInWithChatGPT);
 const mockSignOut = jest.mocked(signOutOfChatGPT);
@@ -74,7 +92,6 @@ describe('Track with AI and the ChatGPT account (Figma 24:4273, 24:4327)', () =>
       expect(screen.getByText('Sign In with ChatGPT')).toBeOnTheScreen();
       expect(screen.queryByTestId('chat-input-row')).not.toBeOnTheScreen();
       expect(screen.queryByTestId('chat-messages')).not.toBeOnTheScreen();
-      expect(screen.queryByTestId('new-chat-prompt')).not.toBeOnTheScreen();
       expect(screen.queryByTestId('chatgpt-sign-out')).not.toBeOnTheScreen();
       expect(mockSignIn.mock.calls).toEqual([[{ newAccount: false }]]);
     });
@@ -144,16 +161,89 @@ describe('Track with AI and the ChatGPT account (Figma 24:4273, 24:4327)', () =>
       mockChatGPTAccount.hasSavedAccount = true;
     });
 
-    it('shows the new-chat prompt above the input row, and Sign Out from GPT under it signs out', async () => {
+    // React Native's Keyboard reads itself as shown from keyboardDidShow until keyboardDidHide; no test leaves it up.
+    afterEach(() => {
+      DeviceEventEmitter.emit('keyboardDidHide', KEYBOARD_DOWN);
+    });
+
+    it('shows the empty chat and the input row, and Sign Out from GPT signs out', async () => {
       await openTrack();
 
       await fireEvent.press(screen.getByTestId('chatgpt-sign-out'));
 
-      expect(screen.getByText('What have I eaten today?')).toBeOnTheScreen();
       expect(screen.getByTestId('chat-input-row')).toBeOnTheScreen();
       expect(screen.getByText('Sign Out from GPT')).toBeOnTheScreen();
       expect(screen.queryByTestId('chatgpt-sign-in')).not.toBeOnTheScreen();
       expect(mockSignOut).toHaveBeenCalledTimes(1);
+    });
+
+    it('draws Sign Out from GPT above the input section and outside it, over an empty chat with no prompt (backlog 19)', async () => {
+      await openTrack();
+
+      const tree = JSON.stringify(screen.toJSON());
+
+      expect(within(screen.getByTestId('chat-input-row')).queryByTestId('chatgpt-sign-out')).not.toBeOnTheScreen();
+      expect(tree.indexOf('"chatgpt-sign-out"')).toBeGreaterThan(-1);
+      // Laid out in one column, so the earlier in the tree is the higher on the screen.
+      expect(tree.indexOf('"chatgpt-sign-out"')).toBeLessThan(tree.indexOf('"chat-input-row"'));
+      expect(screen.queryByText('What have I eaten today?')).not.toBeOnTheScreen();
+    });
+
+    it('leaves Sign Out from GPT under the keyboard rather than carrying it up with the input row (backlog 19)', async () => {
+      await openTrack();
+
+      await act(() => DeviceEventEmitter.emit('keyboardWillShow', KEYBOARD_UP));
+
+      expect(screen.getByTestId('chat-input-row')).toBeOnTheScreen();
+      expect(screen.queryByTestId('chatgpt-sign-out')).not.toBeOnTheScreen();
+
+      await act(() => DeviceEventEmitter.emit('keyboardWillHide', KEYBOARD_DOWN));
+
+      expect(screen.getByTestId('chatgpt-sign-out')).toBeOnTheScreen();
+    });
+
+    it("says ChatGPT settings would not open while the keyboard is still up, though the keyboard covers the link (qa f-ae4ff0)", async () => {
+      mockOpenUsage.mockRejectedValueOnce(new ChatGPTAuthError('failed'));
+      mockEstimate.mockRejectedValueOnce(new EstimateError('usage-limit'));
+      await openTrack();
+      await act(() => DeviceEventEmitter.emit('keyboardWillShow', KEYBOARD_UP));
+
+      await sendText('two eggs');
+      await fireEvent.press(await screen.findByTestId('usage-settings-link'));
+
+      expect(await screen.findByText("Couldn't open ChatGPT settings. Please try again.")).toBeOnTheScreen();
+      expect(screen.queryByTestId('chatgpt-sign-out')).not.toBeOnTheScreen();
+    });
+
+    it('opens with Sign Out from GPT under a keyboard that is already up (backlog 19)', async () => {
+      await act(() => DeviceEventEmitter.emit('keyboardDidShow', KEYBOARD_UP));
+
+      await openTrack();
+
+      expect(screen.getByTestId('chat-input-row')).toBeOnTheScreen();
+      expect(screen.queryByTestId('chatgpt-sign-out')).not.toBeOnTheScreen();
+    });
+
+    it('ends the input row 8pt above the keyboard', async () => {
+      await openTrack();
+
+      await fireEvent(screen.getByTestId('signed-in-chat'), 'layout', layoutEvent(393, 852));
+      await act(async () => {
+        DeviceEventEmitter.emit('keyboardWillShow', KEYBOARD_UP);
+      });
+
+      // Lifted 320pt over a keyboard whose top is at 516: the row's 24pt bottom padding ends it at 852 - 320 - 24 = 508.
+      const { paddingBottom } = StyleSheet.flatten(screen.getByTestId('signed-in-chat').props.style);
+      expect(paddingBottom).toBe(320);
+    });
+
+    it('stops listening to the keyboard once the chat is gone', async () => {
+      const before = ['keyboardWillShow', 'keyboardWillHide'].map((event) => DeviceEventEmitter.listenerCount(event));
+      await openTrack();
+
+      await screen.unmount();
+
+      expect(['keyboardWillShow', 'keyboardWillHide'].map((event) => DeviceEventEmitter.listenerCount(event))).toEqual(before);
     });
 
     it('carries none of the old account row', async () => {
@@ -184,27 +274,46 @@ describe('Track with AI and the ChatGPT account (Figma 24:4273, 24:4327)', () =>
       expect(screen.getByTestId('chatgpt-sign-out')).toBeDisabled();
     });
 
-    it('drops the new-chat prompt once the chat has a message, and keeps Sign Out from GPT', async () => {
+    it('keeps Sign Out from GPT once the chat has a message', async () => {
       mockEstimate.mockResolvedValueOnce({ reply: 'Two eggs, about 150 kcal.', kcal: 150 });
       await openTrack();
 
       await sendText('two eggs');
 
       expect(await screen.findByText('Two eggs, about 150 kcal.')).toBeOnTheScreen();
-      expect(screen.queryByTestId('new-chat-prompt')).not.toBeOnTheScreen();
       expect(screen.getByTestId('chatgpt-sign-out')).toBeOnTheScreen();
     });
 
-    it.each([
-      ['ChatGPT did not confirm the sign-out', () => mockSignOut.mockResolvedValueOnce({ revoked: false }), /ChatGPT didn't confirm it/],
-      ['the sign-out failed', () => mockSignOut.mockRejectedValueOnce(new ChatGPTAuthError('failed')), "Couldn't sign out. Please try again."],
-    ] as const)('says under Sign Out from GPT when %s', async (_case, arrange, copy) => {
-      arrange();
+    it('says under Sign Out from GPT, still signed in, when the sign-out failed', async () => {
+      mockSignOut.mockRejectedValueOnce(new ChatGPTAuthError('failed'));
       await openTrack();
 
       await fireEvent.press(screen.getByTestId('chatgpt-sign-out'));
 
-      expect(await screen.findByText(copy)).toBeOnTheScreen();
+      expect(await screen.findByText("Couldn't sign out. Please try again.")).toBeOnTheScreen();
+      expect(screen.getByTestId('chatgpt-sign-out')).toBeOnTheScreen();
+    });
+
+    it("says under the pill, once signed out, that ChatGPT didn't confirm the sign-out (qa f-49b773)", async () => {
+      let finish: (outcome: SignOutOutcome) => void = () => undefined;
+      mockSignOut.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      );
+      await openTrack();
+
+      await fireEvent.press(screen.getByTestId('chatgpt-sign-out'));
+      await act(() => setMockChatGPTAccount({ status: 'signing-out' }));
+      // The session publishes signed-out before the sign-out's promise resolves to the screen.
+      await act(async () => {
+        setMockChatGPTAccount({ status: 'signed-out' });
+        finish({ revoked: false });
+      });
+
+      expect(within(screen.getByTestId('chatgpt-sign-in')).getByText(/ChatGPT didn't confirm it/)).toBeOnTheScreen();
+      expect(screen.queryByTestId('chatgpt-sign-out')).not.toBeOnTheScreen();
     });
 
     it.each(['usage-limit', 'plan-unavailable'] as const)("opens ChatGPT's usage settings from the %s line", async (kind) => {
@@ -240,7 +349,7 @@ describe('Track with AI and the ChatGPT account (Figma 24:4273, 24:4327)', () =>
 
       await act(() => setMockChatGPTAccount({ status: 'signed-in' }));
 
-      expect(screen.getByTestId('new-chat-prompt')).toBeOnTheScreen();
+      expect(screen.getByTestId('chat-input-row')).toBeOnTheScreen();
       expect(screen.queryByText('two eggs')).not.toBeOnTheScreen();
       expect(screen.queryByText('Two eggs, about 150 kcal.')).not.toBeOnTheScreen();
     });
@@ -259,7 +368,7 @@ describe('Track with AI and the ChatGPT account (Figma 24:4273, 24:4327)', () =>
 
       expect(seen.signal?.aborted).toBe(true);
       expect(screen.queryByText('two eggs')).not.toBeOnTheScreen();
-      expect(screen.getByTestId('new-chat-prompt')).toBeOnTheScreen();
+      expect(screen.getByTestId('chat-input-row')).toBeOnTheScreen();
       expect(screen.getByText('Signing out…')).toBeOnTheScreen();
     });
 

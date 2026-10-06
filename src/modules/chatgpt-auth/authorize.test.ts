@@ -187,6 +187,17 @@ describe('authorizeInBrowser', () => {
     expect(mockOpen.mock.calls[0]?.[1]).toBeNull();
   });
 
+  it('opens the sheet as a private session, so no chatgpt.com login outlives the app’s sign-out (backlog 17)', async () => {
+    const fake = fakeListener();
+
+    const pending = fake.authorize(REAUTHORIZATION);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    fake.arrive({ code: 'c', state: 'state-1' });
+    await pending;
+
+    expect(mockOpen.mock.calls[0]?.[2]).toEqual({ preferEphemeralSession: true });
+  });
+
   it('returns the code, the issued client, the verifier whose challenge was sent and the redirect, then dismisses the sheet and stops the listener', async () => {
     const fake = fakeListener();
 

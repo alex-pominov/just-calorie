@@ -1,10 +1,8 @@
-import type { ReactNode } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { CameraPlusIcon, SendIcon } from '@/assets/icons';
 import { LiquidGlassIconButton } from '@/components/primitives';
-import { colors } from '@/modules/theme';
+import { colors, spacing } from '@/modules/theme';
 
 import type { ChatPhoto } from '../types/track-chat.types';
 import { DraftPhotoPreview } from './DraftPhotoPreview';
@@ -18,19 +16,18 @@ interface ChatInputRowProps {
   canSend: boolean;
   onSend: () => void;
   onAttach: () => void;
-  /** Drawn under the field, inside the home-indicator padding (Figma 24:4327's 'Sign Out from GPT'). */
-  footer?: ReactNode | undefined;
 }
 
-/**
- * Frame 9:3318: camera, field, send, with the attached photo and any picker note above them. It draws to
- * the bottom edge, so it pads itself above the home indicator. Send keeps the frame's light look while disabled.
- */
-export const ChatInputRow = ({ draft, onChangeDraft, photo, onRemovePhoto, note, canSend, onSend, onAttach, footer }: ChatInputRowProps) => {
-  const insets = useSafeAreaInsets();
+/** Under the row: Figma 24:4327's input section pads it 24pt, inside the home-indicator inset, as the frame draws it. */
+export const INPUT_ROW_BOTTOM_PADDING = Number.parseFloat(spacing[6]);
 
+/**
+ * Frame 9:3318: camera, field, send, with the attached photo and any picker note above them, padded as Figma
+ * 24:4327's input section. Send keeps the frame's light look while disabled.
+ */
+export const ChatInputRow = ({ draft, onChangeDraft, photo, onRemovePhoto, note, canSend, onSend, onAttach }: ChatInputRowProps) => {
   return (
-    <View testID="chat-input-row" className="gap-2 px-4 pt-2" style={{ paddingBottom: insets.bottom }}>
+    <View testID="chat-input-row" className="gap-2 px-4 pt-4" style={{ paddingBottom: INPUT_ROW_BOTTOM_PADDING }}>
       {photo === null ? null : <DraftPhotoPreview photo={photo} onRemove={onRemovePhoto} />}
       {note === null ? null : (
         <Text accessibilityRole="alert" className="font-manrope-regular text-label text-content-secondary">
@@ -63,7 +60,6 @@ export const ChatInputRow = ({ draft, onChangeDraft, photo, onRemovePhoto, note,
           <SendIcon />
         </Pressable>
       </View>
-      {footer}
     </View>
   );
 };

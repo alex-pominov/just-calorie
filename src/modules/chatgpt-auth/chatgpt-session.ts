@@ -1,11 +1,13 @@
 import * as Crypto from 'expo-crypto';
-import * as WebBrowser from 'expo-web-browser';
+import * as Linking from 'expo-linking';
 
+import { httpCookiesNative } from '../../../modules/http-cookies';
 import { loopbackCallbackNative } from '../../../modules/loopback-callback';
 import { createAuthorize } from './authorize';
 import { createChatGPTAuth } from './chatgpt-auth';
 import { keychainStore } from './keychain-store';
 import { createLoopbackCallbacks } from './loopback-callback';
+import { createClearOpenAICookies } from './openai-cookies';
 
 /** Where a user reviews and limits what apps spend of their ChatGPT plan (OpenAI's UI guidelines). */
 export const CHATGPT_USAGE_SETTINGS_URL = 'https://chatgpt.com/settings/usage';
@@ -16,7 +18,7 @@ const base64Url = (bytes: Uint8Array) =>
     .replace(/\//g, '_')
     .replace(/=+$/, '');
 
-/** The app's one ChatGPT session: the Keychain, the iOS auth session over the loopback listener, and OpenAI's token endpoint. */
+/** The app's one ChatGPT session: the Keychain, the auth sheet over the loopback listener, OpenAI's token endpoint and cookies. */
 export const chatGPTSession = createChatGPTAuth({
   store: keychainStore,
   fetch: (url, init) => fetch(url, init),
@@ -25,9 +27,10 @@ export const chatGPTSession = createChatGPTAuth({
   newHostId: () => `urn:uuid:${Crypto.randomUUID()}`,
   now: () => Date.now(),
   wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  clearCookies: createClearOpenAICookies(httpCookiesNative),
 });
 
-/** Opens ChatGPT's usage settings in an in-app browser sheet. */
+/** Opens ChatGPT's usage settings in the system browser, so no chatgpt.com login is kept in Just Calorie's own data. */
 export async function openChatGPTUsageSettings(): Promise<void> {
-  await WebBrowser.openBrowserAsync(CHATGPT_USAGE_SETTINGS_URL);
+  await Linking.openURL(CHATGPT_USAGE_SETTINGS_URL);
 }

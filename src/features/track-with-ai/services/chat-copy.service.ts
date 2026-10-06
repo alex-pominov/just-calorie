@@ -22,9 +22,6 @@ export const USAGE_SETTINGS_LINK_COPY = 'ChatGPT settings';
 /** Whether that line ends on the usage-settings link: OpenAI's errors-and-recovery page asks for one. */
 export const linksToUsageSettings = (kind: ChatErrorKind) => kind === 'usage-limit' || kind === 'plan-unavailable';
 
-/** Figma 24:4327: what an empty chat shows, centred. */
-export const NEW_CHAT_PROMPT_COPY = 'What have I eaten today?';
-
 interface ChatDay {
   dayKey: string;
   todayKey: string;
