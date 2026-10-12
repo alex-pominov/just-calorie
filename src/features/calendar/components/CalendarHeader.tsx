@@ -9,6 +9,9 @@ import { cn } from '@/utils/tailwind';
 import { WEEKDAY_COLUMNS } from '../services/month-grid.service';
 import { CalendarHeaderBackdrop } from './CalendarHeaderBackdrop';
 
+// Backlog 20: each week's average sits in a column after Sunday, headed like the days.
+const AVERAGE_COLUMN_LABEL = 'Avg';
+
 interface CalendarHeaderProps {
   onClose: () => void;
   onHeightChange: (height: number) => void;
@@ -36,19 +39,27 @@ export const CalendarHeader = ({ onClose, onHeightChange }: CalendarHeaderProps)
       <View testID="calendar-weekdays" accessibilityElementsHidden className="py-2">
         <CalendarWeekRow
           testID="calendar-weekday-row"
-          cells={WEEKDAY_COLUMNS.map((column) => ({
-            key: column.label,
-            content: (
-              <Text
-                className={cn(
-                  'text-center font-manrope-medium text-label',
-                  column.isWeekend ? 'text-content-muted' : 'text-primary',
-                )}
-              >
-                {column.label}
-              </Text>
-            ),
-          }))}
+          cells={[
+            ...WEEKDAY_COLUMNS.map((column) => ({
+              key: column.label,
+              content: (
+                <Text
+                  className={cn(
+                    'text-center font-manrope-medium text-label',
+                    column.isWeekend ? 'text-content-muted' : 'text-primary',
+                  )}
+                >
+                  {column.label}
+                </Text>
+              ),
+            })),
+            {
+              key: AVERAGE_COLUMN_LABEL,
+              content: (
+                <Text className="text-center font-manrope-medium text-label text-content-muted">{AVERAGE_COLUMN_LABEL}</Text>
+              ),
+            },
+          ]}
         />
       </View>
     </View>

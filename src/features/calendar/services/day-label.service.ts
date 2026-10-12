@@ -16,3 +16,8 @@ export function describeCalendarDay({ dayKey, dayOfMonth, state, figureKcal }: C
 
   return figureKcal === null ? described : `${described}, ${figureKcal} kcal`;
 }
+
+/** What a screen reader says for a week's average, which shows only where the week has one. */
+export function describeWeekAverage(averageKcal: number): string {
+  return `Week average, ${averageKcal} kcal`;
+}

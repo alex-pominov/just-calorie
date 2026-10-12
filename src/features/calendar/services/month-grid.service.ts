@@ -89,6 +89,15 @@ export const WEEKDAY_COLUMNS: readonly WeekdayColumn[] = Array.from({ length: DA
   return { label: weekdayName(utcWeekday).slice(0, 2), isWeekend: isWeekendDay(utcWeekday) };
 });
 
+/** The seven days of a grid day's week, Monday first, whichever month each falls in. */
+export function weekDayKeysOf({ dayKey, dayOfMonth, weekdayIndex }: GridDay): string[] {
+  const { year, month } = parseMonthKey(monthKeyOf(dayKey));
+
+  return Array.from({ length: DAYS_PER_WEEK }, (_, column) =>
+    new Date(Date.UTC(year, month - 1, dayOfMonth - weekdayIndex + column)).toISOString().slice(0, 10),
+  );
+}
+
 export function weekdayNameOf(dayKey: string): string {
   return weekdayName(utcWeekdayOf(parseMonthKey(monthKeyOf(dayKey)), Number(dayKey.slice(8))));
 }

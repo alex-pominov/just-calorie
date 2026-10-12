@@ -1,13 +1,18 @@
 import type { LayoutChangeEvent } from 'react-native';
 import { Text, View } from 'react-native';
 
-import type { CalendarMonthDayCellProps } from '@/components/calendar';
-import { CalendarMonthBlankCell, CalendarMonthDayCell, CalendarWeekRow } from '@/components/calendar';
+import type { CalendarMonthDayCellProps, CalendarWeekRowCell } from '@/components/calendar';
+import {
+  CalendarMonthBlankCell,
+  CalendarMonthDayCell,
+  CalendarWeekAverageCell,
+  CalendarWeekRow,
+} from '@/components/calendar';
 import { cn } from '@/utils/tailwind';
 
-import { describeCalendarDay } from '../services/day-label.service';
+import { describeCalendarDay, describeWeekAverage } from '../services/day-label.service';
 import { WEEKDAY_COLUMNS } from '../services/month-grid.service';
-import type { CalendarDay, CalendarMonth, GridWeek } from '../types/calendar.types';
+import type { CalendarDay, CalendarMonth, CalendarWeek, GridWeek } from '../types/calendar.types';
 
 interface CalendarMonthSectionProps {
   month: CalendarMonth;
@@ -29,6 +34,28 @@ function toCellProps(day: CalendarDay): CalendarMonthDayCellProps {
 
 const weekKey = (week: GridWeek<CalendarDay>) => week.find((day) => day !== null)?.dayKey;
 
+function toRowCells({ days, averageKcal }: CalendarWeek): CalendarWeekRowCell[] {
+  const dayCells = WEEKDAY_COLUMNS.map((_, column) => {
+    const day = days[column] ?? null;
+
+    return day === null
+      ? { key: `blank-${column}`, content: <CalendarMonthBlankCell /> }
+      : { key: day.dayKey, content: <CalendarMonthDayCell {...toCellProps(day)} /> };
+  });
+  const averageCell =
+    averageKcal === null ? (
+      <CalendarMonthBlankCell />
+    ) : (
+      <CalendarWeekAverageCell
+        figure={String(averageKcal)}
+        accessibilityLabel={describeWeekAverage(averageKcal)}
+        testID={`calendar-week-average-${weekKey(days)}`}
+      />
+    );
+
+  return [...dayCells, { key: 'average', content: averageCell }];
+}
+
 export const CalendarMonthSection = ({ month, onLayout }: CalendarMonthSectionProps) => (
   <View
     testID={`calendar-month-${month.monthKey}`}
@@ -42,17 +69,7 @@ export const CalendarMonthSection = ({ month, onLayout }: CalendarMonthSectionPr
     </View>
     <View testID={`calendar-grid-${month.monthKey}`} className="gap-2">
       {month.weeks.map((week) => (
-        <CalendarWeekRow
-          key={weekKey(week)}
-          testID={`calendar-week-${weekKey(week)}`}
-          cells={WEEKDAY_COLUMNS.map((_, column) => {
-            const day = week[column] ?? null;
-
-            return day === null
-              ? { key: `blank-${column}`, content: <CalendarMonthBlankCell /> }
-              : { key: day.dayKey, content: <CalendarMonthDayCell {...toCellProps(day)} /> };
-          })}
-        />
+        <CalendarWeekRow key={weekKey(week.days)} testID={`calendar-week-${weekKey(week.days)}`} cells={toRowCells(week)} />
       ))}
     </View>
   </View>

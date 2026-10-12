@@ -9,7 +9,8 @@ export type CalendarDayState = DayStatus | 'today' | 'future';
 /** One recorded day as the calendar consumes it, whatever the read that produced it. */
 export interface CalendarDayRecord {
   status: DayStatus;
-  totalKcal: number;
+  /** The day's entries alone; an added carry-over is never part of it (backlog 20). */
+  eatenKcal: number;
 }
 
 /** Every recorded day the calendar shows, and the earliest of them, which starts the month range. */
@@ -60,6 +61,12 @@ export interface PlainCalendarDay extends GridDay {
 
 export type CalendarDay = JudgedCalendarDay | PlainCalendarDay;
 
+/** A grid row, and the average of the Monday-to-Sunday week it is part of, which a month split shares. */
+export interface CalendarWeek {
+  days: GridWeek<CalendarDay>;
+  averageKcal: number | null;
+}
+
 /** Where a month sits relative to today's. */
 export type MonthPosition = 'past' | 'current' | 'upcoming';
 
@@ -67,5 +74,5 @@ export interface CalendarMonth {
   monthKey: MonthKey;
   title: string;
   position: MonthPosition;
-  weeks: readonly GridWeek<CalendarDay>[];
+  weeks: readonly CalendarWeek[];
 }

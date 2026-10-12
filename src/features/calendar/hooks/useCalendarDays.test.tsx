@@ -40,22 +40,22 @@ describe('useCalendarDays', () => {
     await waitFor(() => expect(result.current).not.toBeNull());
     expect(result.current?.earliestDayKey).toBe('2026-10-02');
     expect(Object.fromEntries(result.current?.byDayKey ?? [])).toEqual({
-      '2026-10-01': { status: 'unfilled', totalKcal: 0 },
-      '2026-10-02': { status: 'on-track', totalKcal: 1200 },
-      '2026-10-03': { status: 'overaten', totalKcal: 2500 },
-      '2026-10-04': { status: 'unfilled', totalKcal: 0 },
-      '2026-10-05': { status: 'unfilled', totalKcal: 0 },
+      '2026-10-01': { status: 'unfilled', eatenKcal: 0 },
+      '2026-10-02': { status: 'on-track', eatenKcal: 1200 },
+      '2026-10-03': { status: 'overaten', eatenKcal: 2500 },
+      '2026-10-04': { status: 'unfilled', eatenKcal: 0 },
+      '2026-10-05': { status: 'unfilled', eatenKcal: 0 },
     });
   });
 
   it('re-reads after a write to the database', async () => {
     await addEntry(database, { dayKey: '2026-10-01', kind: 'add', kcal: 1200 });
     const { result } = await renderHook(() => useCalendarDays('2026-10-04'), { wrapper });
-    await waitFor(() => expect(result.current?.byDayKey.get('2026-10-01')).toEqual({ status: 'on-track', totalKcal: 1200 }));
+    await waitFor(() => expect(result.current?.byDayKey.get('2026-10-01')).toEqual({ status: 'on-track', eatenKcal: 1200 }));
 
     await act(() => addEntry(database, { dayKey: '2026-10-01', kind: 'add', kcal: 900 }));
 
-    await waitFor(() => expect(result.current?.byDayKey.get('2026-10-01')).toEqual({ status: 'overaten', totalKcal: 2100 }));
+    await waitFor(() => expect(result.current?.byDayKey.get('2026-10-01')).toEqual({ status: 'overaten', eatenKcal: 2100 }));
   });
 
   it('reads only the current month, every day unfilled, when nothing is recorded', async () => {
@@ -64,8 +64,8 @@ describe('useCalendarDays', () => {
     await waitFor(() => expect(result.current).not.toBeNull());
     expect(result.current?.earliestDayKey).toBeNull();
     expect(Object.fromEntries(result.current?.byDayKey ?? [])).toEqual({
-      '2026-10-01': { status: 'unfilled', totalKcal: 0 },
-      '2026-10-02': { status: 'unfilled', totalKcal: 0 },
+      '2026-10-01': { status: 'unfilled', eatenKcal: 0 },
+      '2026-10-02': { status: 'unfilled', eatenKcal: 0 },
     });
   });
 });

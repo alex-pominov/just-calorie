@@ -13,10 +13,10 @@ interface CalendarWeekRowProps {
   testID?: string | undefined;
 }
 
-/** A full-width row of seven columns; the weekday headings and every week use it, so their columns line up. */
+/** A full-width row of equal columns; the weekday headings and every week use it, so their columns line up. */
 export const CalendarWeekRow = ({ cells, testID }: CalendarWeekRowProps) => {
   const { width } = useWindowDimensions();
-  const { cellWidth, gap, inset } = weekGeometry(width);
+  const { cellWidth, gap, inset } = weekGeometry({ rowWidth: width, columnCount: cells.length });
 
   return (
     <View testID={testID} className="flex-row" style={{ paddingLeft: inset, columnGap: gap }}>

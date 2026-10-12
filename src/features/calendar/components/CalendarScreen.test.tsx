@@ -119,7 +119,7 @@ describe('CalendarScreen', () => {
       ['2026-09-28', '2026-09-29', '2026-10-01', '2026-10-02', '2026-10-03', '2026-10-04', '2026-10-05', '2026-11-01'].map(labelOf),
     ).toEqual([
       'Monday 28 September, over the cap, 2500 kcal',
-      'Tuesday 29 September, unfilled, 500 kcal',
+      'Tuesday 29 September, unfilled, 0 kcal',
       'Thursday 1 October, on track, 1200 kcal',
       'Friday 2 October, unfilled, 0 kcal',
       'Saturday 3 October, on track, 2000 kcal',
@@ -159,8 +159,8 @@ describe('CalendarScreen', () => {
       const weeks = ['calendar-week-2026-09-28', 'calendar-week-2026-10-01', 'calendar-week-2026-10-26'].map(rowGeometry);
 
       expect(weeks).toEqual([header, header, header]);
-      expect(header.widths).toHaveLength(7);
-      expect(header.paddingLeft * 2 + header.widths.reduce((sum, w) => sum + w, 0) + header.columnGap * 6).toBeLessThanOrEqual(width);
+      expect(header.widths).toHaveLength(8);
+      expect(header.paddingLeft * 2 + header.widths.reduce((sum, w) => sum + w, 0) + header.columnGap * 7).toBeLessThanOrEqual(width);
     },
   );
 

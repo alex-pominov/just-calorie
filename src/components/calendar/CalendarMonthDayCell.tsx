@@ -27,6 +27,12 @@ interface CalendarMonthBlankCellProps {
   testID?: string | undefined;
 }
 
+interface CalendarWeekAverageCellProps {
+  figure: string;
+  accessibilityLabel: string;
+  testID?: string | undefined;
+}
+
 // The width is the column's: CalendarWeekRow sizes it.
 const CELL = 'h-14';
 
@@ -72,4 +78,17 @@ export const CalendarMonthDayCell = (props: CalendarMonthDayCellProps) => (
 /** Holds a grid column before a month's first day. */
 export const CalendarMonthBlankCell = ({ testID }: CalendarMonthBlankCellProps) => (
   <View accessibilityElementsHidden testID={testID} className={CELL} />
+);
+
+/** A week's average in the column after Sunday, on a tile so it reads apart from the days' own figures. */
+export const CalendarWeekAverageCell = ({ figure, accessibilityLabel, testID }: CalendarWeekAverageCellProps) => (
+  <View
+    accessible
+    accessibilityRole="text"
+    accessibilityLabel={accessibilityLabel}
+    testID={testID}
+    className={cn(CELL, 'justify-center rounded-md bg-white-50')}
+  >
+    <Text className="text-center font-manrope-semibold text-figure text-content-secondary">{figure}</Text>
+  </View>
 );

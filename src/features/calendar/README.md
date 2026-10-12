@@ -2,7 +2,8 @@
 
 The Calendar screen at `/calendar` and its model: every month from the earliest recorded day through one month after the
 current one, laid out as Monday-first weeks, with each day in one of the five states frame `9:3396`
-draws (on track, over, unfilled, today, future) and the figure it shows. Days are display-only.
+draws (on track, over, unfilled, today, future) and the figure it shows, and each week's average in a column after
+Sunday. Days are display-only.
 
 ## Who depends on it
 
@@ -13,7 +14,9 @@ icon (main-screen workstream) navigates there. Nothing imports the feature other
 
 - **The day-status rule and the multi-day read are tracking's**, shared with the main screen
   (`dayStatus`, `useDaySummaries`). `hooks/useCalendarDays.ts` is the only file that reads stored days
-  or judges one; the rest of the feature works on its plain `{ status, totalKcal }` records.
+  or judges one; the rest of the feature works on its plain `{ status, eatenKcal }` records. It judges
+  each day as if no carry-over had been added, so the main screen's rule and the carry-over chain stay
+  as they are while the calendar judges what was eaten.
 - **The earliest recorded day is read by tracking's `useEarliestDayKey`**, which this feature added: the
   shared read takes an explicit range and returns every day in it, so it cannot say where the range
   should start, and the `days` table it reads is tracking's. The read runs from the 1st of that day's
@@ -23,8 +26,15 @@ icon (main-screen workstream) navigates there. Nothing imports the feature other
   start are this feature's.
 - **Owner rulings** (workstream `calendar`: request [1] approved the defaults, request [3] added the
   year); each is one line:
-  - the figure is the day's stored total, shown unclamped when negative; an unfilled day shows its
-    total dimmed, so `0` with no row and its added carry-over when it has no entries;
+  - the figure is what the day ate, its entries alone and never an added carry-over (backlog 20, which
+    replaced the stored total), shown unclamped when negative; an unfilled day (no entry rows) shows it
+    dimmed, so `0` with no row and `0` with only a carry-over added;
+  - the colour judges that same figure against the day's cap snapshot, so a day is over only when its
+    entries alone exceed the cap (backlog 20);
+  - a week's average is the mean eaten over its Monday-to-Sunday days before today that have entries,
+    rounded, and none when it has no such day; a week split across two months shows the same figure on
+    both rows (backlog 20). No Figma frame draws it: it sits in an eighth column headed `Avg`, so at
+    393pt the day columns narrow from the frame's 48pt to about 41pt to make room;
   - the range starts at the earliest recorded month and shows one upcoming month
     (`UPCOMING_MONTH_COUNT`);
   - weeks start on Monday (`FIRST_WEEKDAY`);

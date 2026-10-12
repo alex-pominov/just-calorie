@@ -3,12 +3,14 @@ import type {
   CalendarDayRecord,
   CalendarDays,
   CalendarMonth,
+  CalendarWeek,
   GridDay,
+  GridWeek,
   MonthKey,
   MonthPosition,
 } from '../types/calendar.types';
 import { deriveCalendarDayState } from './day-state.service';
-import { buildMonthGrid, calendarMonthKeys, monthKeyOf, monthTitle } from './month-grid.service';
+import { buildMonthGrid, calendarMonthKeys, monthKeyOf, monthTitle, weekDayKeysOf } from './month-grid.service';
 
 interface CalendarInput {
   todayKey: string;
@@ -16,7 +18,7 @@ interface CalendarInput {
 }
 
 // A day nobody wrote to has no entry rows, which acceptance [1] calls unfilled.
-const UNRECORDED_DAY: CalendarDayRecord = { status: 'unfilled', totalKcal: 0 };
+const UNRECORDED_DAY: CalendarDayRecord = { status: 'unfilled', eatenKcal: 0 };
 
 function toCalendarDay(day: GridDay, { todayKey, days }: CalendarInput): CalendarDay {
   const record = days.byDayKey.get(day.dayKey) ?? UNRECORDED_DAY;
@@ -26,9 +28,37 @@ function toCalendarDay(day: GridDay, { todayKey, days }: CalendarInput): Calenda
     return { ...day, state, figureKcal: null };
   }
 
-  // Owner default (request [1]): every past day shows its stored total, unclamped; the state dims an unfilled one.
-  return { ...day, state, figureKcal: record.totalKcal };
+  // Every past day shows what was eaten, unclamped (backlog 20); the state dims an unfilled one.
+  return { ...day, state, figureKcal: record.eatenKcal };
 }
+
+/** Backlog 20 rule (b): the mean eaten over the week's days before today that have entries, rounded; null without one. */
+function weekAverageKcal(week: GridWeek<GridDay>, { todayKey, days }: CalendarInput): number | null {
+  const anyDay = week.find((day): day is GridDay => day !== null);
+
+  if (anyDay === undefined) {
+    return null;
+  }
+
+  let eatenKcal = 0;
+  let counted = 0;
+
+  for (const dayKey of weekDayKeysOf(anyDay)) {
+    const record = days.byDayKey.get(dayKey);
+
+    if (dayKey < todayKey && record !== undefined && record.status !== 'unfilled') {
+      eatenKcal += record.eatenKcal;
+      counted += 1;
+    }
+  }
+
+  return counted === 0 ? null : Math.round(eatenKcal / counted);
+}
+
+const toCalendarWeek = (week: GridWeek<GridDay>, input: CalendarInput): CalendarWeek => ({
+  days: week.map((day) => (day === null ? null : toCalendarDay(day, input))),
+  averageKcal: weekAverageKcal(week, input),
+});
 
 function positionOf(monthKey: MonthKey, currentMonth: MonthKey): MonthPosition {
   if (monthKey === currentMonth) {
@@ -45,6 +75,6 @@ export function buildCalendarMonths(input: CalendarInput): CalendarMonth[] {
     monthKey,
     title: monthTitle(monthKey, currentMonth),
     position: positionOf(monthKey, currentMonth),
-    weeks: buildMonthGrid(monthKey).weeks.map((week) => week.map((day) => (day === null ? null : toCalendarDay(day, input)))),
+    weeks: buildMonthGrid(monthKey).weeks.map((week) => toCalendarWeek(week, input)),
   }));
 }

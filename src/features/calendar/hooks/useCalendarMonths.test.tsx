@@ -14,7 +14,7 @@ import { useCalendarMonths } from './useCalendarMonths';
 
 const dayIn = (months: readonly CalendarMonth[] | null, dayKey: string): CalendarDay | undefined =>
   months
-    ?.flatMap((month) => month.weeks.flat())
+    ?.flatMap((month) => month.weeks.flatMap((week) => week.days))
     .find((day): day is CalendarDay => day !== null && day.dayKey === dayKey);
 
 describe('useCalendarMonths', () => {
